@@ -35,6 +35,6 @@ USER app
 EXPOSE 42780
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
-  CMD-SHELL wget -qO- "http://127.0.0.1:${PORT:-42780}/ready" || exit 1
+  CMD wget -qO- "http://127.0.0.1:${PORT:-42780}/ready" || exit 1
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "dist/server.js"]
