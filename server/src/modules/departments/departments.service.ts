@@ -1,5 +1,5 @@
-import db, { uuid } from '../../db';
-import { AppError } from '../../lib/app-error';
+import db, { uuid } from '../../db/index.js';
+import { AppError } from '../../lib/app-error.js';
 
 function mapDepartment(d: any) {
   return { id: d.id, name: d.name, description: d.description, managerId: d.manager_id, createdAt: d.created_at, updatedAt: d.updated_at };
@@ -28,7 +28,7 @@ export class DepartmentsService {
 
   static async update(id: string, input: any) {
     await this.getById(id);
-    const sets = ["updated_at = datetime('now')"]; const params: any[] = [];
+    const sets = ["updated_at = NOW()"]; const params: any[] = [];
     if (input.name !== undefined) {
       const existing = await db.prepare('SELECT id FROM departments WHERE name = ? AND id != ?').get(input.name, id);
       if (existing) throw new AppError(409, 'Name already exists');

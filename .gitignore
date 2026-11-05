@@ -1,7 +1,8 @@
 node_modules/
-dist/
+vendor/
 .next/
-data.db
+dist/
+release/
 *.db
 *.db-wal
 *.db-shm
@@ -28,6 +29,10 @@ yarn-error.log*
 *.tsbuildinfo
 .next
 out/
+dist/
+release/
+!web/dist/.gitkeep
+!web/out/.gitkeep
 server_out.txt
 server_err.txt
 
@@ -37,3 +42,15 @@ START_*.bat
 STOP_*.bat
 server_err.txt
 server_out.txt
+
+# test & coverage output
+coverage/
+playwright-report/
+test-results/
+
+# runtime data
+backup/
+uploads/
+*.log
+
+

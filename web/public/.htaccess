@@ -1,0 +1,18 @@
+<IfModule mod_headers.c>
+  # Allow geolocation on Hostinger static hosting (Express header never reaches browser for FTP deploys)
+  Header set Permissions-Policy "geolocation=(self)"
+  # Mirror Express Helmet CSP but allow API domain when frontend and API are split on Hostinger
+  Header set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://api.power-tech.group https://power-tech.group https://www.power-tech.group; font-src 'self'; object-src 'none'; frame-ancestors 'none'"
+</IfModule>
+# Hostinger: ensure SPA fallback (Apache) — keep if public_html is static export
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteCond %{REQUEST_URI} !^/api/
+  RewriteCond %{REQUEST_URI} !^/socket.io/
+  RewriteCond %{REQUEST_URI} !^/health
+  RewriteCond %{REQUEST_URI} !^/ready
+  RewriteCond %{REQUEST_URI} !^/api-docs
+  RewriteRule . /index.html [L]
+</IfModule>

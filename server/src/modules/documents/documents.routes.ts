@@ -1,10 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { validate, requireUuid } from '../../middleware/validate';
-import { authenticate } from '../../middleware/authenticate';
-import { requireRole } from '../../middleware/rbac';
-import { ActivityLogsService } from '../activity-logs/activity-logs.service';
-import { createDocumentRequestSchema, listDocumentsSchema, issueDocumentBodySchema, rejectDocumentSchema } from './documents.schema';
-import { DocumentsService } from './documents.service';
+import { validate, requireUuid } from '../../middleware/validate.js';
+import { authenticate } from '../../middleware/authenticate.js';
+import { requireRole } from '../../middleware/rbac.js';
+import { ActivityLogsService } from '../activity-logs/activity-logs.service.js';
+import { createDocumentRequestSchema, listDocumentsSchema, issueDocumentBodySchema, rejectDocumentSchema } from './documents.schema.js';
+import { DocumentsService } from './documents.service.js';
 
 const router = Router();
 

@@ -1,11 +1,11 @@
 import { Router, Request, Response } from 'express';
-import { validate } from '../../middleware/validate';
-import { authenticate } from '../../middleware/authenticate';
-import { requireRole } from '../../middleware/rbac';
-import { apiCache } from '../../middleware/api-cache';
-import { cache } from '../../lib/cache';
-import { createTeamSchema, updateTeamSchema, addMembersSchema, removeMembersSchema } from './teams.schema';
-import { TeamsService } from './teams.service';
+import { validate } from '../../middleware/validate.js';
+import { authenticate } from '../../middleware/authenticate.js';
+import { requireRole } from '../../middleware/rbac.js';
+import { apiCache } from '../../middleware/api-cache.js';
+import { cache } from '../../lib/cache.js';
+import { createTeamSchema, updateTeamSchema, addMembersSchema, removeMembersSchema, teamNameParamSchema } from './teams.schema.js';
+import { TeamsService } from './teams.service.js';
 
 const router = Router();
 
@@ -71,7 +71,7 @@ router.delete('/:teamName/members', requireRole('director'), validate(removeMemb
   } catch (err) { next(err); }
 });
 
-router.delete('/:teamName', requireRole('director'), async (req: Request, res: Response, next) => {
+router.delete('/:teamName', requireRole('director'), validate(teamNameParamSchema, 'params'), async (req: Request, res: Response, next) => {
   try {
     const result = await TeamsService.delete(req.params.teamName!);
     cache.delContaining('/api/v1/teams');

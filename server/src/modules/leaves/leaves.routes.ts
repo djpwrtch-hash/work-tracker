@@ -1,12 +1,12 @@
 import { Router, Request, Response } from 'express';
-import { validate, requireUuid } from '../../middleware/validate';
-import { authenticate } from '../../middleware/authenticate';
-import { requireRole } from '../../middleware/rbac';
-import { apiCache } from '../../middleware/api-cache';
-import { AppError } from '../../lib/app-error';
-import { ActivityLogsService } from '../activity-logs/activity-logs.service';
-import { createLeaveSchema, listLeavesSchema, reviewLeaveSchema } from './leaves.schema';
-import { LeavesService } from './leaves.service';
+import { validate, requireUuid } from '../../middleware/validate.js';
+import { authenticate } from '../../middleware/authenticate.js';
+import { requireRole } from '../../middleware/rbac.js';
+import { apiCache } from '../../middleware/api-cache.js';
+import { AppError } from '../../lib/app-error.js';
+import { ActivityLogsService } from '../activity-logs/activity-logs.service.js';
+import { createLeaveSchema, listLeavesSchema, reviewLeaveSchema } from './leaves.schema.js';
+import { LeavesService } from './leaves.service.js';
 
 const router = Router();
 

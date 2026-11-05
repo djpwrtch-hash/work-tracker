@@ -172,7 +172,8 @@ export async function exportToExcel(data: any[], filename: string, headers: stri
 
   // Auto-column-width
   const colWidths = headers.map((h, i) => {
-    const maxLen = Math.max(h.length, ...data.map((row) => String(row[h] ?? '').length));
+    let maxLen = h.length;
+    for (const row of data) { const l = String(row[h] ?? '').length; if (l > maxLen) maxLen = l; }
     return { wch: Math.min(maxLen + 2, 40) };
   });
   worksheet['!cols'] = colWidths;
@@ -201,7 +202,8 @@ export async function exportMultiSheetExcel(sections: { title: string; headers: 
     )];
     const ws = XLSX.utils.aoa_to_sheet(worksheetData);
     ws['!cols'] = section.headers.map((h, i) => {
-      const maxLen = Math.max(h.length, ...section.rows.map(r => String(r[i] ?? '').length));
+      let maxLen = h.length;
+      for (const r of section.rows) { const l = String(r[i] ?? '').length; if (l > maxLen) maxLen = l; }
       return { wch: Math.min(maxLen + 2, 45) };
     });
     XLSX.utils.book_append_sheet(workbook, ws, section.title.slice(0, 31));

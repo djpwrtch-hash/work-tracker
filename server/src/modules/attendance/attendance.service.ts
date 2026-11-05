@@ -1,8 +1,8 @@
-import db, { uuid } from '../../db';
-import { getISTDate, getISTNow, parseUTC } from '../../lib/time';
-import { getIO } from '../../lib/socket';
-import { cache } from '../../lib/cache';
-import { AppError } from '../../lib/app-error';
+import db, { uuid } from '../../db/index.js';
+import { getISTDate, getISTNow, parseUTC } from '../../lib/time.js';
+import { getIO } from '../../lib/socket.js';
+import { cache } from '../../lib/cache.js';
+import { AppError } from '../../lib/app-error.js';
 
 const HALF_DAY_THRESHOLD = 4;
 
@@ -133,7 +133,12 @@ export class AttendanceService {
     }
 
     const now = new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
-    await db.prepare("UPDATE attendance SET pause_start_time = ?, pause_end_time = NULL, status = 'on_break', updated_at = ? WHERE id = ?").run(now, now, rec.id);
+    const hasLocation = input?.latitude !== undefined && input?.longitude !== undefined;
+    if (hasLocation) {
+      await db.prepare("UPDATE attendance SET pause_start_time = ?, pause_end_time = NULL, status = 'on_break', latitude = ?, longitude = ?, location_accuracy = ?, location_captured_at = ?, updated_at = ? WHERE id = ?").run(now, now, input!.latitude, input!.longitude, input!.accuracy ?? null, input!.locationCapturedAt ?? now, now, rec.id);
+    } else {
+      await db.prepare("UPDATE attendance SET pause_start_time = ?, pause_end_time = NULL, status = 'on_break', updated_at = ? WHERE id = ?").run(now, now, rec.id);
+    }
     logEvent(rec.id, userId, 'pause_start', input, now);
     const updated = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(rec.id);
     invalidateAttendanceCache();
@@ -162,8 +167,14 @@ export class AttendanceService {
     const nowIso = now.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
 
     const restoreStatus = rec.status === 'remote' ? 'remote' : 'present';
-    await db.prepare(`UPDATE attendance SET pause_end_time = ?, pause_minutes = ?, status = ?, updated_at = ? WHERE id = ?`)
-      .run(nowIso, totalPause, restoreStatus, nowIso, rec.id);
+    const hasLocationEnd = input?.latitude !== undefined && input?.longitude !== undefined;
+    if (hasLocationEnd) {
+      await db.prepare(`UPDATE attendance SET pause_end_time = ?, pause_minutes = ?, status = ?, latitude = ?, longitude = ?, location_accuracy = ?, location_captured_at = ?, updated_at = ? WHERE id = ?`)
+        .run(nowIso, totalPause, restoreStatus, input!.latitude, input!.longitude, input!.accuracy ?? null, input!.locationCapturedAt ?? nowIso, nowIso, rec.id);
+    } else {
+      await db.prepare(`UPDATE attendance SET pause_end_time = ?, pause_minutes = ?, status = ?, updated_at = ? WHERE id = ?`)
+        .run(nowIso, totalPause, restoreStatus, nowIso, rec.id);
+    }
     logEvent(rec.id, userId, 'pause_end', input, nowIso);
     const updated = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(rec.id);
     invalidateAttendanceCache();
@@ -338,7 +349,7 @@ export class AttendanceService {
 
   static async update(id: string, input: any) {
     if (!await db.prepare('SELECT id FROM attendance WHERE id = ?').get(id)) throw new AppError(404, 'Record not found');
-    const sets: string[] = ["updated_at = datetime('now')"]; const params: any[] = [];
+    const sets: string[] = ["updated_at = NOW()"]; const params: any[] = [];
     if (input.status) { sets.push('status = ?'); params.push(input.status); }
     if (input.loginTime) { sets.push('login_time = ?'); params.push(input.loginTime); }
     if (input.logoutTime) { sets.push('logout_time = ?'); params.push(input.logoutTime); }

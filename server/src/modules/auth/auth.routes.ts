@@ -1,31 +1,29 @@
 import { Router, Request, Response } from 'express';
-import { validate } from '../../middleware/validate';
-import { authenticate } from '../../middleware/authenticate';
-import { requireRole } from '../../middleware/rbac';
+import { validate } from '../../middleware/validate.js';
+import { authenticate } from '../../middleware/authenticate.js';
+import { requireRole } from '../../middleware/rbac.js';
 import rateLimit from 'express-rate-limit';
-import { RateLimitStore } from '../../lib/rate-limit-store';
-import { ActivityLogsService } from '../activity-logs/activity-logs.service';
-import { loginSchema, registerSchema, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema, twoFactorVerifySchema, twoFactorDisableSchema } from './auth.schema';
-import { AuthService } from './auth.service';
-import { config } from '../../lib/config';
-import { createTOTPSecret, buildTOTPUri } from '../../lib/totp';
+import { RateLimitStore } from '../../lib/rate-limit-store.js';
+import { ActivityLogsService } from '../activity-logs/activity-logs.service.js';
+import { loginSchema, registerSchema, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema, twoFactorVerifySchema, twoFactorDisableSchema } from './auth.schema.js';
+import { AuthService } from './auth.service.js';
+import { config } from '../../lib/config.js';
+import { createTOTPSecret, buildTOTPUri } from '../../lib/totp.js';
 
 const router = Router();
 
-const isProduction = process.env.NODE_ENV === 'production';
-
 const COOKIE_OPTS = {
   httpOnly: true,
-  sameSite: 'strict' as const,
-  secure: isProduction,
+  sameSite: config.cookieSameSite,
+  secure: config.cookieSecure,
   path: '/api/v1/auth',
   maxAge: 30 * 24 * 60 * 60 * 1000,
 };
 
 const ACCESS_COOKIE_OPTS = {
   httpOnly: true,
-  sameSite: 'strict' as const,
-  secure: isProduction,
+  sameSite: config.cookieSameSite,
+  secure: config.cookieSecure,
   path: '/',
   maxAge: 15 * 60 * 1000,
 };
@@ -39,6 +37,16 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many login attempts for this account. Try again later.' },
   store: new RateLimitStore('login'),
+});
+
+const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: config.nodeEnv === 'production' ? 60 : 200,
+  keyGenerator: (req) => req.ip || 'unknown',
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many refresh attempts. Try again later.' },
+  store: new RateLimitStore('refresh'),
 });
 
 router.post('/login', validate(loginSchema), loginLimiter, async (req: Request, res: Response, next) => {
@@ -63,7 +71,7 @@ router.post('/register', authenticate, requireRole('director'), validate(registe
   } catch (err) { next(err); }
 });
 
-router.post('/refresh', async (req: Request, res: Response, next) => {
+router.post('/refresh', refreshLimiter, async (req: Request, res: Response, next) => {
   try {
     const refreshToken = req.cookies?.refreshToken;
     if (!refreshToken) return res.status(400).json({ error: 'Refresh token is required' });
@@ -72,8 +80,8 @@ router.post('/refresh', async (req: Request, res: Response, next) => {
     res.cookie('refreshToken', result.refreshToken, COOKIE_OPTS);
     res.json({ accessToken: result.accessToken });
   } catch (err) {
-    res.clearCookie('refreshToken', { path: '/api/v1/auth', httpOnly: true, sameSite: 'strict', secure: isProduction });
-    res.clearCookie('accessToken', { path: '/', httpOnly: true, sameSite: 'strict', secure: isProduction });
+    res.clearCookie('refreshToken', { path: '/api/v1/auth', httpOnly: true, sameSite: config.cookieSameSite, secure: config.cookieSecure });
+    res.clearCookie('accessToken', { path: '/', httpOnly: true, sameSite: config.cookieSameSite, secure: config.cookieSecure });
     next(err);
   }
 });
@@ -84,8 +92,8 @@ router.post('/logout', async (req: Request, res: Response, next) => {
     if (refreshToken) {
       try { await AuthService.logout(refreshToken); } catch (e) { /* token already invalid, still clear cookies */ }
     }
-    res.clearCookie('refreshToken', { path: '/api/v1/auth', httpOnly: true, sameSite: 'strict', secure: isProduction });
-    res.clearCookie('accessToken', { path: '/', httpOnly: true, sameSite: 'strict', secure: isProduction });
+    res.clearCookie('refreshToken', { path: '/api/v1/auth', httpOnly: true, sameSite: config.cookieSameSite, secure: config.cookieSecure });
+    res.clearCookie('accessToken', { path: '/', httpOnly: true, sameSite: config.cookieSameSite, secure: config.cookieSecure });
     res.json({ message: 'Logged out' });
   } catch (err) { next(err); }
 });
@@ -96,8 +104,8 @@ router.post('/change-password', authenticate, validate(changePasswordSchema), as
     try { await ActivityLogsService.create(req.user!.sub, 'change_password', 'auth', req.user!.sub, undefined, req.ip); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     const rt = req.cookies?.refreshToken;
     if (rt) await AuthService.logout(rt);
-    res.clearCookie('refreshToken', { path: '/api/v1/auth', httpOnly: true, sameSite: 'strict', secure: isProduction });
-    res.clearCookie('accessToken', { path: '/', httpOnly: true, sameSite: 'strict', secure: isProduction });
+    res.clearCookie('refreshToken', { path: '/api/v1/auth', httpOnly: true, sameSite: config.cookieSameSite, secure: config.cookieSecure });
+    res.clearCookie('accessToken', { path: '/', httpOnly: true, sameSite: config.cookieSameSite, secure: config.cookieSecure });
     res.json({ message: 'Password changed' });
   } catch (err) { next(err); }
 });
@@ -150,7 +158,7 @@ const forgotPasswordLimiter = rateLimit({
 router.post('/forgot-password', forgotPasswordLimiter, validate(forgotPasswordSchema), async (req: Request, res: Response, next) => {
   try {
     const result = await AuthService.forgotPassword(req.body.email);
-    try { await ActivityLogsService.create('system', 'forgot_password', 'auth', undefined, { email: req.body.email }, req.ip); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
+    try { await ActivityLogsService.create(null, 'forgot_password', 'auth', undefined, { email: req.body.email }, req.ip); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     res.json(result);
   } catch (err) { next(err); }
 });

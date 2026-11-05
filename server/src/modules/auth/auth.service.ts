@@ -1,23 +1,23 @@
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
-import db, { uuid } from '../../db';
-import { config } from '../../lib/config';
-import { signAccessToken, signRefreshToken, signPendingAuthToken, verifyPendingAuthToken, verifyRefreshToken } from '../../lib/jwt';
-import type { RegisterInput } from './auth.schema';
-import { hashToken, verifyTokenHash } from '../../lib/crypto';
-import { revokeUserTokens } from '../../lib/blacklist';
-import { parseUTC } from '../../lib/time';
-import { nextEmployeeId } from '../users/users.service';
-import { AppError } from '../../lib/app-error';
-import { bcryptBreaker } from '../../lib/circuit-breaker';
-import { sendPasswordResetEmail, isEmailConfigured, sendSecurityAlertEmail } from '../../lib/email';
-import { verifyTOTP } from '../../lib/totp';
-import { getPasswordPolicy, validatePassword, checkPasswordHistory, recordPassword, isPasswordExpired } from '../../lib/password-policy';
-import { SlidingWindowRateLimiter } from '../../lib/rate-limit-store';
+import db, { uuid } from '../../db/index.js';
+import { config } from '../../lib/config.js';
+import { signAccessToken, signRefreshToken, signPendingAuthToken, verifyPendingAuthToken, verifyRefreshToken } from '../../lib/jwt.js';
+import type { RegisterInput } from './auth.schema.js';
+import { hashToken, verifyTokenHash } from '../../lib/crypto.js';
+import { revokeUserTokens } from '../../lib/blacklist.js';
+import { parseUTC } from '../../lib/time.js';
+import { nextEmployeeId } from '../users/users.service.js';
+import { AppError } from '../../lib/app-error.js';
+import { bcryptBreaker } from '../../lib/circuit-breaker.js';
+import { sendPasswordResetEmail, isEmailConfigured, sendSecurityAlertEmail } from '../../lib/email.js';
+import { verifyTOTP } from '../../lib/totp.js';
+import { getPasswordPolicy, validatePassword, checkPasswordHistory, recordPassword, isPasswordExpired } from '../../lib/password-policy.js';
+import { RateLimitStore } from '../../lib/rate-limit-store.js';
 
 const SALT_ROUNDS = 12;
-const MAX_LOGIN_ATTEMPTS = 5;
-const LOCKOUT_MINUTES = 15;
+const MAX_LOGIN_ATTEMPTS = config.maxLoginAttempts;
+const LOCKOUT_MINUTES = config.lockoutMinutes;
 const IP_WINDOW_MS = 15 * 60 * 1000;
 const IP_MAX_ATTEMPTS = 10;
 const EMAIL_WINDOW_MS = 15 * 60 * 1000;
@@ -26,30 +26,35 @@ const PROGRESSIVE_DELAY_THRESHOLD = 3;
 const PROGRESSIVE_DELAY_MS = 1000;
 const SECURITY_ALERT_THRESHOLD = 3;
 
-const ipLimiter = new SlidingWindowRateLimiter();
-const emailLimiter = new SlidingWindowRateLimiter();
+// DB-backed so login throttling survives restarts and is shared across replicas.
+const ipLimiter = new RateLimitStore('login:ip');
+const emailLimiter = new RateLimitStore('login:email');
+ipLimiter.init({ windowMs: IP_WINDOW_MS });
+emailLimiter.init({ windowMs: EMAIL_WINDOW_MS });
 
 export class AuthService {
   static async login(input: { email: string; password: string; pendingAuthToken?: string; twoFactorCode?: string }, userAgent?: string, ip?: string) {
     const email = input.email.toLowerCase().trim();
 
-    // Sliding window rate limit by IP
-    const ipKey = `login:ip:${ip ?? 'unknown'}`;
-    const ipResult = await ipLimiter.increment(ipKey, IP_WINDOW_MS, IP_MAX_ATTEMPTS);
-    if (!ipResult.allowed) {
-      throw new AppError(429, `Too many login attempts from this IP. Retry after ${Math.ceil(ipResult.retryAfterMs / 1000)} seconds`);
+    // Rate limit by IP (fixed 15-minute window, stored in MySQL)
+    const ipKey = ip ?? 'unknown';
+    const ipResult = await ipLimiter.increment(ipKey);
+    if (ipResult.totalHits > IP_MAX_ATTEMPTS) {
+      const retryAfterMs = Math.max(0, (ipResult.resetTime?.getTime() ?? Date.now()) - Date.now());
+      throw new AppError(429, `Too many login attempts from this IP. Retry after ${Math.ceil(retryAfterMs / 1000)} seconds`);
     }
 
-    // Sliding window rate limit by email
-    const emailKey = `login:email:${email}`;
-    const emailResult = await emailLimiter.increment(emailKey, EMAIL_WINDOW_MS, EMAIL_MAX_ATTEMPTS);
-    if (!emailResult.allowed) {
-      throw new AppError(429, `Too many login attempts for this account. Retry after ${Math.ceil(emailResult.retryAfterMs / 1000)} seconds`);
+    // Rate limit by email (fixed 15-minute window, stored in MySQL)
+    const emailKey = email;
+    const emailResult = await emailLimiter.increment(emailKey);
+    if (emailResult.totalHits > EMAIL_MAX_ATTEMPTS) {
+      const retryAfterMs = Math.max(0, (emailResult.resetTime?.getTime() ?? Date.now()) - Date.now());
+      throw new AppError(429, `Too many login attempts for this account. Retry after ${Math.ceil(retryAfterMs / 1000)} seconds`);
     }
 
     // Progressive delay after threshold
-    if (emailResult.attempts > PROGRESSIVE_DELAY_THRESHOLD) {
-      const delayMs = (emailResult.attempts - PROGRESSIVE_DELAY_THRESHOLD) * PROGRESSIVE_DELAY_MS;
+    if (emailResult.totalHits > PROGRESSIVE_DELAY_THRESHOLD) {
+      const delayMs = (emailResult.totalHits - PROGRESSIVE_DELAY_THRESHOLD) * PROGRESSIVE_DELAY_MS;
       await new Promise(resolve => setTimeout(resolve, delayMs));
     }
 
@@ -57,7 +62,8 @@ export class AuthService {
     if (!user) throw new AppError(401, 'Invalid credentials');
     if (user.status !== 'active') throw new AppError(401, 'Invalid credentials');
     if (user.locked_until && parseUTC(user.locked_until) > new Date()) {
-      throw new AppError(423, 'Account is temporarily locked');
+      // Uniform response to avoid revealing that the account exists / is locked.
+      throw new AppError(401, 'Invalid credentials');
     }
 
     if (user.two_factor_enabled) {
@@ -71,8 +77,8 @@ export class AuthService {
     }
 
     // Reset rate limiters on success
-    await emailLimiter.reset(emailKey);
-    await ipLimiter.reset(ipKey);
+    await emailLimiter.resetKey(emailKey);
+    await ipLimiter.resetKey(ipKey);
 
     return AuthService.issueSession(user, userAgent, ip);
   }
@@ -92,10 +98,10 @@ export class AuthService {
         throw new AppError(401, 'Invalid two-factor code');
       }
 
-      const emailKey = `login:email:${input.email.toLowerCase().trim()}`;
-      await emailLimiter.reset(emailKey);
-      const ipKey = `login:ip:${ip || 'unknown'}`;
-      await ipLimiter.reset(ipKey);
+      const emailKey = input.email.toLowerCase().trim();
+      await emailLimiter.resetKey(emailKey);
+      const ipKey = ip || 'unknown';
+      await ipLimiter.resetKey(ipKey);
 
       return AuthService.issueSession(user, userAgent, ip);
     }
@@ -116,8 +122,7 @@ export class AuthService {
   private static async recordFailedAttempt(user: any, email: string, ip?: string) {
     // Send security alert after threshold
     if (user.failed_login_attempts + 1 >= SECURITY_ALERT_THRESHOLD) {
-      const emailKey = `login:email:${email}`;
-      const emailAttempts = await emailLimiter.getAttempts(emailKey, EMAIL_WINDOW_MS);
+      const emailAttempts = await emailLimiter.getHits(email.toLowerCase().trim());
       if (emailAttempts >= SECURITY_ALERT_THRESHOLD) {
         sendSecurityAlertEmail((user.email as string) ?? email, ip).catch(e => console.error('[AUTH] Security alert email failed:', e));
       }
@@ -125,7 +130,7 @@ export class AuthService {
 
     // Atomic increment to avoid TOCTOU race condition
     if (user.failed_login_attempts + 1 >= MAX_LOGIN_ATTEMPTS) {
-      await db.prepare("UPDATE users SET failed_login_attempts = failed_login_attempts + 1, locked_until = datetime('now', '+' || ? || ' minutes') WHERE id = ?")
+      await db.prepare("UPDATE users SET failed_login_attempts = failed_login_attempts + 1, locked_until = DATE_ADD(NOW(), INTERVAL ? MINUTE) WHERE id = ?")
         .run(LOCKOUT_MINUTES, user.id);
     } else {
       await db.prepare('UPDATE users SET failed_login_attempts = failed_login_attempts + 1 WHERE id = ?').run(user.id);
@@ -143,12 +148,12 @@ export class AuthService {
 
   private static async issueSession(user: any, userAgent?: string, ip?: string) {
     return await db.transaction(async () => {
-      await db.prepare("UPDATE users SET failed_login_attempts = 0, locked_until = NULL, last_login_at = datetime('now') WHERE id = ?").run(user.id);
+      await db.prepare("UPDATE users SET failed_login_attempts = 0, locked_until = NULL, last_login_at = NOW() WHERE id = ?").run(user.id);
 
       const tokenId = uuid();
       const rawRefresh = signRefreshToken(user.id, tokenId);
       const tokenHash = hashToken(rawRefresh);
-      await db.prepare(`INSERT INTO refresh_tokens (id, user_id, token_hash, user_agent, ip_address, expires_at) VALUES (?, ?, ?, ?, ?, datetime('now', '+' || ? || ' days'))`)
+      await db.prepare(`INSERT INTO refresh_tokens (id, user_id, token_hash, user_agent, ip_address, expires_at) VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))`)
         .run(tokenId, user.id, tokenHash, userAgent ?? null, ip ?? null, config.jwtRefreshTtlDays);
 
       const accessToken = signAccessToken(user.id, user.email, user.role);
@@ -194,7 +199,7 @@ export class AuthService {
       throw new AppError(401, 'Current password is incorrect');
     }
 
-    await db.prepare("UPDATE users SET two_factor_enabled = 0, two_factor_secret = NULL, updated_at = datetime('now') WHERE id = ?").run(userId);
+    await db.prepare("UPDATE users SET two_factor_enabled = 0, two_factor_secret = NULL, updated_at = NOW() WHERE id = ?").run(userId);
     return { enabled: false };
   }
 
@@ -211,8 +216,6 @@ export class AuthService {
     const id = uuid();
     const passwordHash = await bcryptBreaker.call(() => bcrypt.hash(input.password, SALT_ROUNDS));
 
-    // Wrap employee ID generation + INSERT in a single transaction
-    // to prevent race conditions on nextEmployeeId.
     const employeeId = await db.transaction(async () => {
       const empId = await nextEmployeeId();
       await db.prepare(`INSERT INTO users (id, employee_id, first_name, last_name, email, password_hash, phone_number, department_id, designation, joining_date)
@@ -236,7 +239,7 @@ export class AuthService {
       // Replay of an already-revoked token: revoke every session for this user.
       await db.transaction(async () => {
         await revokeUserTokens(payload.sub);
-        await db.prepare("UPDATE refresh_tokens SET revoked_at = datetime('now') WHERE user_id = ?").run(payload.sub);
+await db.prepare("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ?").run(payload.sub);
       })();
       throw new AppError(401, 'Refresh token revoked');
     }
@@ -248,12 +251,12 @@ export class AuthService {
       const current = await db.prepare('SELECT revoked_at FROM refresh_tokens WHERE id = ? FOR UPDATE').get(stored.id) as any;
       if (current?.revoked_at) throw new AppError(401, 'Refresh token already used');
 
-      await db.prepare("UPDATE refresh_tokens SET revoked_at = datetime('now') WHERE id = ?").run(stored.id);
+      await db.prepare("UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = ?").run(stored.id);
 
       const newTokenId = uuid();
       const newRawRefresh = signRefreshToken(payload.sub, newTokenId);
       const newHash = hashToken(newRawRefresh);
-      await db.prepare(`INSERT INTO refresh_tokens (id, user_id, token_hash, user_agent, ip_address, expires_at) VALUES (?, ?, ?, ?, ?, datetime('now', '+' || ? || ' days'))`)
+      await db.prepare(`INSERT INTO refresh_tokens (id, user_id, token_hash, user_agent, ip_address, expires_at) VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))`)
         .run(newTokenId, payload.sub, newHash, stored.user_agent, stored.ip_address, config.jwtRefreshTtlDays);
 
       const user = await db.prepare('SELECT id, email, role, status FROM users WHERE id = ?').get(payload.sub) as any;
@@ -267,7 +270,7 @@ export class AuthService {
   static async logout(refreshToken: string) {
     const payload = verifyRefreshToken(refreshToken);
     await revokeUserTokens(payload.sub);
-    await db.prepare("UPDATE refresh_tokens SET revoked_at = datetime('now') WHERE user_id = ?").run(payload.sub);
+    await db.prepare("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ?").run(payload.sub);
   }
 
   static async changePassword(userId: string, input: { currentPassword: string; newPassword: string }) {
@@ -289,10 +292,10 @@ export class AuthService {
     }
 
     await db.transaction(async () => {
-      await db.prepare("UPDATE users SET password_hash = ?, failed_login_attempts = 0, locked_until = NULL, updated_at = datetime('now') WHERE id = ?").run(newHash, userId);
+      await db.prepare("UPDATE users SET password_hash = ?, failed_login_attempts = 0, locked_until = NULL, updated_at = NOW() WHERE id = ?").run(newHash, userId);
       await recordPassword(userId, newHash);
       await revokeUserTokens(userId);
-      await db.prepare("UPDATE refresh_tokens SET revoked_at = datetime('now') WHERE user_id = ?").run(userId);
+      await db.prepare("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ?").run(userId);
     })();
   }
 
@@ -327,15 +330,16 @@ export class AuthService {
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
     const id = uuid();
 
-    await db.prepare(`INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, datetime('now', '+1 hour'))`)
+    await db.prepare(`INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))`)
       .run(id, user.id, tokenHash);
 
     const sent = await sendPasswordResetEmail(user.email, rawToken);
     if (!sent) {
-      await db.prepare('DELETE FROM password_reset_tokens WHERE id = ?').run(id);
       if (config.nodeEnv !== 'production') {
-        const base = process.env.APP_URL ?? 'http://localhost:3000';
+        const base = process.env.APP_URL ?? 'http://localhost:42780';
         console.log(`[RESET] Dev-only password reset link for ${user.email}: ${base}/reset-password?token=${rawToken}`);
+      } else {
+        await db.prepare('DELETE FROM password_reset_tokens WHERE id = ?').run(id);
       }
     }
 
@@ -344,7 +348,7 @@ export class AuthService {
 
   static async resetPassword(token: string, newPassword: string) {
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-    const row = await db.prepare("SELECT * FROM password_reset_tokens WHERE token_hash = ? AND used_at IS NULL AND expires_at > datetime('now')").get(tokenHash) as any;
+    const row = await db.prepare("SELECT * FROM password_reset_tokens WHERE token_hash = ? AND used_at IS NULL AND expires_at > NOW()").get(tokenHash) as any;
     if (!row) throw new AppError(400, 'Invalid or expired reset token');
 
     const policy = await getPasswordPolicy();
@@ -361,10 +365,10 @@ export class AuthService {
     }
 
     await db.transaction(async () => {
-      await db.prepare("UPDATE users SET password_hash = ?, failed_login_attempts = 0, locked_until = NULL, updated_at = datetime('now') WHERE id = ?").run(passwordHash, row.user_id);
+      await db.prepare("UPDATE users SET password_hash = ?, failed_login_attempts = 0, locked_until = NULL, updated_at = NOW() WHERE id = ?").run(passwordHash, row.user_id);
       await recordPassword(row.user_id, passwordHash);
-      await db.prepare("UPDATE password_reset_tokens SET used_at = datetime('now') WHERE id = ?").run(row.id);
-      await db.prepare("UPDATE refresh_tokens SET revoked_at = datetime('now') WHERE user_id = ?").run(row.user_id);
+      await db.prepare("UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ?").run(row.id);
+      await db.prepare("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ?").run(row.user_id);
       await revokeUserTokens(row.user_id);
     })();
   }

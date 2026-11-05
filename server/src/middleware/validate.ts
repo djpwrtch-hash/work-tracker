@@ -10,10 +10,11 @@ export function validate(schema: ZodSchema, source: 'body' | 'query' | 'params' 
       next();
     } catch (err) {
       if (err instanceof ZodError) {
-        console.warn(`[VALIDATION] ${req.method} ${req.path} - ${err.errors.length} error(s):`, err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join('; '));
+        const issues = err.issues;
+        console.warn(`[VALIDATION] ${req.method} ${req.path} - ${issues.length} error(s):`, issues.map(e => `${e.path.join('.')}: ${e.message}`).join('; '));
         res.status(400).json({
           error: 'Validation failed',
-          details: err.errors.map((e) => ({
+          details: issues.map((e) => ({
             path: e.path.join('.'),
             message: e.message,
           })),

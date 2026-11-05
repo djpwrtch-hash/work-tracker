@@ -1,10 +1,11 @@
 import bcrypt from 'bcrypt';
-import db, { uuid } from '../../db';
-import { AppError } from '../../lib/app-error';
-import { bcryptBreaker } from '../../lib/circuit-breaker';
-import { invalidateUserCache } from '../../middleware/authenticate';
-import type { CreateUserInput, UpdateUserInput, ListUsersInput } from './users.schema';
-import { getPasswordPolicy, validatePassword } from '../../lib/password-policy';
+import db, { uuid } from '../../db/index.js';
+import { AppError } from '../../lib/app-error.js';
+import { bcryptBreaker } from '../../lib/circuit-breaker.js';
+import { generateEmployeeId } from '../../lib/employee-id.js';
+import { invalidateUserCache } from '../../middleware/authenticate.js';
+import type { CreateUserInput, UpdateUserInput, ListUsersInput } from './users.schema.js';
+import { getPasswordPolicy, validatePassword } from '../../lib/password-policy.js';
 
 const SALT_ROUNDS = 12;
 
@@ -31,12 +32,7 @@ function mapUser(u: any) {
 }
 
 export async function nextEmployeeId(): Promise<string> {
-  return await db.transaction(async () => {
-    const row = (await db.prepare("SELECT MAX(CAST(SUBSTR(employee_id, 5) AS UNSIGNED)) as max_seq FROM users").get()) as any;
-    const maxSeq = row?.max_seq ?? 0;
-    const candidate = `EMP-${String(maxSeq + 1).padStart(4, '0')}`;
-    return candidate;
-  })();
+  return generateEmployeeId();
 }
 
 export class UsersService {
@@ -71,8 +67,6 @@ export class UsersService {
     const id = uuid();
     const passwordHash = await bcryptBreaker.call(() => bcrypt.hash(input.password, SALT_ROUNDS));
 
-    // Wrap employee ID generation + email check + INSERT in a single transaction
-    // to prevent race conditions on nextEmployeeId.
     await db.transaction(async () => {
       const empId = await nextEmployeeId();
 
@@ -89,11 +83,11 @@ export class UsersService {
       const upcomingGlobalHolidays = await db.prepare(`
         SELECT h.date, h.name FROM holidays h
         LEFT JOIN holiday_assignees ha ON ha.holiday_id = h.id
-        WHERE h.date >= date('now')
+        WHERE h.date >= CURDATE()
         GROUP BY h.id HAVING COUNT(ha.user_id) = 0
       `).all() as any[];
       if (upcomingGlobalHolidays.length > 0) {
-        const insertAtt = db.prepare(`INSERT INTO attendance (id, user_id, date, status, notes, created_at, updated_at) VALUES (?, ?, ?, 'holiday', ?, datetime('now'), datetime('now')) ON CONFLICT(user_id, date) DO NOTHING`);
+        const insertAtt = db.prepare(`INSERT INTO attendance (id, user_id, date, status, notes, created_at, updated_at) VALUES (?, ?, ?, 'holiday', ?, NOW(), NOW()) ON DUPLICATE KEY UPDATE status = VALUES(status)`);
         const trx = await db.transaction(async () => {
           for (const h of upcomingGlobalHolidays) {
             await insertAtt.run(uuid(), id, h.date, h.name);
@@ -107,12 +101,18 @@ export class UsersService {
     return await this.getById(id);
   }
 
-  static async update(id: string, input: UpdateUserInput) {
+  static async update(id: string, input: UpdateUserInput, requesterRole?: string) {
     if (!await db.prepare('SELECT id FROM users WHERE id = ?').get(id)) throw new AppError(404, 'User not found');
     const allowedFields = ['firstName', 'lastName', 'phoneNumber', 'departmentId', 'designation', 'joiningDate', 'status', 'role', 'dob', 'gender', 'fatherName', 'nationality', 'qualification', 'addressStreet', 'addressCity', 'addressState', 'addressPincode'];
-    const sets: string[] = ["updated_at = datetime('now')"];
+    // Privilege guard: only directors may change role or status (HR would otherwise self-promote)
+    const sanitized: Record<string, unknown> = { ...(input as Record<string, unknown>) };
+    if (requesterRole !== 'director') {
+      delete sanitized.role;
+      delete sanitized.status;
+    }
+    const sets: string[] = ["updated_at = NOW()"];
     const params: any[] = [];
-    for (const [k, v] of Object.entries(input)) {
+    for (const [k, v] of Object.entries(sanitized)) {
       if (v === undefined || !allowedFields.includes(k)) continue;
       const col = k.replace(/([A-Z])/g, '_$1').toLowerCase();
       sets.push(`${col} = ?`);
@@ -134,6 +134,7 @@ export class UsersService {
     if (holidays > 0) throw new AppError(409, `Cannot delete user: they created ${holidays} holiday(s). Delete those holidays first.`);
 
     await db.prepare('DELETE FROM users WHERE id = ?').run(id);
+    invalidateUserCache(id);
     return { message: 'User deleted' };
   }
 

@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 import fs from 'fs';
 import path from 'path';
-import { pool } from '../db/index.js';
+import db from '../db/index.js';
 
 // Wipe operational data but keep admin credentials & stable config
 // Keep: schema_migrations, password_policies, file_retention_policies, departments(Engineering), users(director/hr), app_settings
@@ -11,76 +11,83 @@ import { pool } from '../db/index.js';
 const KEEP_DEPT = 'Engineering';
 
 async function wipe() {
+  // Production guard: require explicit --force flag (prevents accidental prod wipe)
+  if (process.env.NODE_ENV === 'production' && !process.argv.includes('--force')) {
+    console.error('[Wipe] ABORT: refusing to run in production without --force flag.');
+    console.error('[Wipe] Re-run as: npm run wipe:operational -- --force (after npm run backup)');
+    process.exit(1);
+  }
   console.log('[Wipe] Starting — keeping admin & stable config...');
 
   // 1. Verify admin exists before wipe
-  const admins = (await pool.query('SELECT id, email, role FROM users WHERE role IN (?, ?)', ['director', 'hr']) as any)[0] as any[];
+  const admins = (await db.prepare('SELECT id, email, role FROM users WHERE role IN (?, ?)').all('director', 'hr')) as any[];
   if (admins.length === 0) {
     console.error('[Wipe] ABORT: No director/hr found — would lock out. Create admin first.');
     process.exit(1);
   }
   console.log(`[Wipe] Keeping ${admins.length} admin(s):`, admins.map((a) => `${a.email} (${a.role})`).join(', '));
 
-  const queries: string[] = [
+  const tables: string[] = [
     // Level 1 children
-    'TRUNCATE TABLE holiday_assignees',
-    'TRUNCATE TABLE scheduled_report_results',
-    'TRUNCATE TABLE task_assignments',
-    'TRUNCATE TABLE task_comments',
-    'TRUNCATE TABLE task_attachments',
-    'TRUNCATE TABLE task_approvals',
-    'TRUNCATE TABLE attendance_events',
+    'holiday_assignees',
+    'scheduled_report_results',
+    'task_assignments',
+    'task_comments',
+    'task_attachments',
+    'task_approvals',
+    'attendance_events',
     // Level 2 parents
-    'TRUNCATE TABLE attendance',
-    'TRUNCATE TABLE tasks',
-    'TRUNCATE TABLE holidays',
-    'TRUNCATE TABLE scheduled_reports',
-    'TRUNCATE TABLE report_templates',
+    'attendance',
+    'tasks',
+    'holidays',
+    'scheduled_reports',
+    'report_templates',
     // Level 3 operational
-    'TRUNCATE TABLE work_plans',
-    'TRUNCATE TABLE work_reports',
-    'TRUNCATE TABLE leaves',
-    'TRUNCATE TABLE leave_carryforwards',
-    'TRUNCATE TABLE monthly_overtime',
-    'TRUNCATE TABLE notifications',
-    'TRUNCATE TABLE activity_logs',
-    'TRUNCATE TABLE api_audit_log',
-    'TRUNCATE TABLE email_logs',
-    'TRUNCATE TABLE document_requests',
-    'TRUNCATE TABLE file_uploads',
-    'TRUNCATE TABLE team_members',
-    'TRUNCATE TABLE refresh_tokens',
-    'TRUNCATE TABLE password_reset_tokens',
-    'TRUNCATE TABLE password_history',
+    'work_plans',
+    'work_reports',
+    'leaves',
+    'leave_carryforwards',
+    'monthly_overtime',
+    'notifications',
+    'activity_logs',
+    'api_audit_log',
+    'email_logs',
+    'document_requests',
+    'file_uploads',
+    'team_members',
+    'refresh_tokens',
+    'password_reset_tokens',
+    'password_history',
   ];
 
-  for (const sql of queries) {
+  for (const table of tables) {
+    if (!/^[a-z_][a-z0-9_]*$/i.test(table)) continue;
     try {
-      await pool.query(sql);
-      console.log(`[Wipe] ${sql}`);
+      const result = await db.prepare(`DELETE FROM ${table}`).run();
+      console.log(`[Wipe] DELETE FROM ${table} (${result.changes} rows)`);
     } catch (e: any) {
-      if (e.message?.includes("doesn't exist") || e.message?.includes('Unknown table')) {
-        console.log(`[Wipe] Skip (not exists): ${sql}`);
+      if (e.message?.includes('no such table')) {
+        console.log(`[Wipe] Skip (not exists): DELETE FROM ${table}`);
       } else {
-        console.error(`[Wipe] Failed: ${sql}`, e.message);
+        console.error(`[Wipe] Failed: DELETE FROM ${table}`, e.message);
       }
     }
   }
 
   // Level 4 filtered — keep director/hr and Engineering
-  const delUsers = (await pool.query("DELETE FROM users WHERE role = 'employee'") as any)[0];
-  console.log(`[Wipe] Deleted ${(delUsers as any).affectedRows ?? 0} employee user(s)`);
+  const delUsers = await db.prepare("DELETE FROM users WHERE role = 'employee'").run();
+  console.log(`[Wipe] Deleted ${delUsers.changes ?? 0} employee user(s)`);
 
-  const delDepts = (await pool.query('DELETE FROM departments WHERE name != ?', [KEEP_DEPT]) as any)[0];
-  console.log(`[Wipe] Deleted ${(delDepts as any).affectedRows ?? 0} department(s) (kept ${KEEP_DEPT})`);
+  const delDepts = await db.prepare('DELETE FROM departments WHERE name != ?').run(KEEP_DEPT);
+  console.log(`[Wipe] Deleted ${delDepts.changes ?? 0} department(s) (kept ${KEEP_DEPT})`);
 
   // Level 5 ephemeral
-  for (const sql of ['TRUNCATE TABLE token_blacklist', 'TRUNCATE TABLE rate_limits', 'TRUNCATE TABLE api_cache']) {
+  for (const table of ['token_blacklist', 'rate_limits', 'api_cache']) {
     try {
-      await pool.query(sql);
-      console.log(`[Wipe] ${sql}`);
+      await db.prepare(`DELETE FROM ${table}`).run();
+      console.log(`[Wipe] DELETE FROM ${table}`);
     } catch (e: any) {
-      console.log(`[Wipe] Skip: ${sql}`, e.message);
+      console.log(`[Wipe] Skip: DELETE FROM ${table}`, e.message);
     }
   }
 
@@ -101,11 +108,11 @@ async function wipe() {
   }
 
   // Verify
-  const [migrations] = (await pool.query('SELECT COUNT(*) as c FROM schema_migrations') as any);
-  const [policies] = (await pool.query('SELECT COUNT(*) as c FROM password_policies') as any);
-  const [retention] = (await pool.query('SELECT COUNT(*) as c FROM file_retention_policies') as any);
-  const [remainingUsers] = (await pool.query('SELECT role, COUNT(*) as c FROM users GROUP BY role') as any);
-  console.log(`[Wipe] Verify — schema_migrations: ${migrations[0].c}, password_policies: ${policies[0].c}, file_retention_policies: ${retention[0].c}`);
+  const migrations = (await db.prepare('SELECT COUNT(*) as c FROM schema_migrations').get()) as any;
+  const policies = (await db.prepare('SELECT COUNT(*) as c FROM password_policies').get()) as any;
+  const retention = (await db.prepare('SELECT COUNT(*) as c FROM file_retention_policies').get()) as any;
+  const remainingUsers = (await db.prepare('SELECT role, COUNT(*) as c FROM users GROUP BY role').all()) as any;
+  console.log(`[Wipe] Verify — schema_migrations: ${migrations.c}, password_policies: ${policies.c}, file_retention_policies: ${retention.c}`);
   console.log('[Wipe] Remaining users:', remainingUsers);
 
   console.log('[Wipe] Done — admin login preserved, operational data cleared. 50GB Hostinger: run npm run backup before wipe for safety.');

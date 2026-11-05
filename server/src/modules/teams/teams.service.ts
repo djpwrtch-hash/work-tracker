@@ -1,5 +1,5 @@
-import db from '../../db';
-import { AppError } from '../../lib/app-error';
+import db from '../../db/index.js';
+import { AppError } from '../../lib/app-error.js';
 
 export class TeamsService {
   static async list() {
@@ -87,7 +87,7 @@ export class TeamsService {
       const ph = userIds.map(() => '(?, ?, ?)').join(', ');
       const p: any[] = [];
       for (const uid of userIds) { p.push(uid, teamName, 'member'); }
-      await db.prepare(`INSERT OR IGNORE INTO team_members (user_id, team_name, role) VALUES ${ph}`).run(...p);
+      await db.prepare(`INSERT IGNORE INTO team_members (user_id, team_name, role) VALUES ${ph}`).run(...p);
       return await this.getByName(teamName);
     })();
   }

@@ -1,0 +1,26 @@
+.git
+.gitignore
+.github
+# Never ship secrets, including nested workspace env files (server/.env).
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+**/node_modules
+**/dist
+**/coverage
+**/test-results
+**/playwright-report
+**/*.log
+**/.DS_Store
+**/Thumbs.db
+server/uploads
+server/backup
+backup
+uploads
+release
+*.bat
+# Desktop launcher is local-only; the cloud image serves the web app from web/dist.
+desktop
+server/desktop

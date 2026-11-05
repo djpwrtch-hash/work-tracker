@@ -1,0 +1,48 @@
+name: Deploy Frontend to Hostinger
+
+on:
+  workflow_dispatch:
+# push disabled — Hostinger deploy via GitHub is OFF (manual File Manager / dist upload only)
+#  push:
+#    branches: [main]
+#    paths:
+#      - 'web/**'
+#      - '.github/workflows/deploy-frontend.yml'
+
+jobs:
+  deploy-frontend:
+    name: Build web/dist and FTP to public_html
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build static frontend
+        run: npm run build -w web
+        env:
+          HOSTINGER: 'true'
+          # Single-process Hostinger (Node 22, Root ./, dist/server.js) serves API + web on same origin -> use relative /api or same origin
+          VITE_API_URL: https://power-tech.group
+          NEXT_PUBLIC_API_URL: https://power-tech.group
+
+      # For Hostinger Node single-process (Other preset, Entry server.js, Output dist), the build on Hostinger itself
+      # already serves web/dist via Express (server/src/app.ts:221). FTP is only needed if you use Hostinger *Web Hosting* (Apache public_html) separately.
+      # Keep FTP disabled by default — Hostinger Node will auto-pull from GitHub and run `npm run build` itself.
+      - name: FTP upload web/dist to public_html (skip for Node single-process)
+        if: ${{ false }}
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./web/dist/
+          server-dir: ${{ secrets.FTP_SERVER_DIR }}
+          dangerous-clean-slate: false

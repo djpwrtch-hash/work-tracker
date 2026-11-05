@@ -1,9 +1,9 @@
 import { Server as HttpServer } from 'http';
 import { Server, Socket } from 'socket.io';
-import db from '../db';
-import { verifyAccessToken, type AccessTokenPayload } from './jwt';
-import { isTokenRevoked } from './blacklist';
-import { config } from './config';
+import db from '../db/index.js';
+import { verifyAccessToken, type AccessTokenPayload } from './jwt.js';
+import { isTokenRevoked } from './blacklist.js';
+import { config } from './config.js';
 
 let io: Server | null = null;
 
@@ -13,8 +13,11 @@ const reconnectTracker = new Map<string, { count: number; firstSeen: number; las
 
 const MAX_CONNECTIONS_PER_USER = 5;
 const MAX_CONNECTIONS_PER_IP = 20;
-const HEARTBEAT_INTERVAL = 30000;
-const HEARTBEAT_TIMEOUT = 15000;
+const HEARTBEAT_INTERVAL = 25000;
+// 15s was too tight: a backgrounded browser tab, a Windows sleep/resume or a slow moment
+// (for example while the daily backup runs) missed the pong and the socket was dropped
+// with "ping timeout" while the client was still perfectly healthy.
+const HEARTBEAT_TIMEOUT = 45000;
 const SUSPICIOUS_RECONNECT_THRESHOLD = 10;
 const SUSPICIOUS_WINDOW_MS = 5 * 60 * 1000;
 
@@ -174,7 +177,13 @@ export function initializeSocket(httpServer: HttpServer) {
 }
 
 export function getIO(): Server {
-  if (!io) throw new Error('Socket.IO not initialized');
+  if (!io) {
+    // No HTTP server in tests/CLI (hr_test) — return no-op mock instead of throwing
+    if (process.env.NODE_ENV !== 'production') {
+      return { to: () => ({ emit: () => {} }), emit: () => {} } as any;
+    }
+    throw new Error('Socket.IO not initialized');
+  }
   return io;
 }
 

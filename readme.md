@@ -1,6 +1,6 @@
 # Employee Work Tracker
 
-[![CI](https://github.com/djpwrtch-hash/Administrative-Management/actions/workflows/ci.yml/badge.svg)](https://github.com/djpwrtch-hash/Administrative-Management/actions/workflows/ci.yml)
+[![CI](https://github.com/PowerTechConsultants/Work-Tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/PowerTechConsultants/Work-Tracker/actions/workflows/ci.yml)
 
 A production-grade full-stack workforce management application for small to medium teams (30-35 employees). Replaces manual spreadsheets with a centralized system for attendance, tasks, leaves, work plans, reports, and analytics.
 
@@ -8,36 +8,61 @@ A production-grade full-stack workforce management application for small to medi
 
 | Layer | Technology |
 |-------|-----------|
-| **Backend** | Node.js, Express 4.x, TypeScript, mysql2 (raw SQL) |
-| **Frontend** | Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS 4 |
-| **Database** | MySQL 8.0 with InnoDB |
-| **Auth** | JWT access + refresh tokens (httpOnly cookies), bcrypt (12 rounds) |
-| **Real-time** | Socket.IO for live notifications |
-| **Charts** | Recharts for analytics dashboards |
-| **State** | TanStack React Query v5, Axios with interceptors |
-| **Testing** | Vitest (frontend only) |
-| **Deployment** | Docker, PM2, Nginx reverse proxy |
+| **Backend** | Node.js 22+, Express 4.x, TypeScript, mysql2 (MySQL) |
+| **Database** | MySQL 8.0 via `mysql2/promise`. `server/src/db/schema.sql` is the source of truth (migrations 1-19 are idempotent). |
+| **Deployment** | Docker (localhost) / PM2 |
 
-## Quick Start
+## Quick Start (localhost)
 
 ### Prerequisites
-- Node.js 20+
+- Node.js 22+
 - npm 9+
+- MySQL 8.0 running locally (Windows service `MySQL80`)
 
-### Setup
+### One-click run (recommended)
+
+1. Start MySQL once: `net start MySQL80` (Administrator) or `services.msc` → start **MySQL80**
+2. Run `START.bat`
+
+The script checks MySQL, starts the app on the single stable port **42780**
+(API + built frontend on one origin), waits until the database is ready, and opens
+**http://localhost:42780**. Use `STOP.bat` to stop everything.
+
+To see code changes on that port, rebuild the frontend: `npm run build -w web`.
+For instant hot reload while editing, use dev mode — it keeps the same URL:
 
 ```bash
-git clone https://github.com/djpwrtch-hash/Administrative-Management.git
-cd Administrative-Management
-npm install
-cp server/.env.example server/.env
 npm run dev
 ```
 
-- **Frontend:** http://localhost:3000
-- **Backend API:** http://localhost:4000
-- **Health Check:** http://localhost:4000/health
-- **API Docs:** http://localhost:4000/api-docs
+### Stopping the app
+
+The app runs until **you** stop it. Nothing else ends it (no OS watchdog, no idle-killer):
+
+- press `Ctrl+C`, run `STOP.bat`, or shut down Windows
+- `STOP.bat` asks the server to shut down gracefully (token-guarded `POST /internal/stop`)
+  and only force-terminates as a fallback
+
+Server output is mirrored to `%TEMP%\wt-api.log`.
+
+### Manual run
+
+```bash
+npm install
+copy server\.env.example server\.env    # set MYSQL_PASSWORD, JWT secrets, ADMIN_*
+npm run setup                           # create schema + first admin
+npm run build                           # build the frontend served on 42780
+npm start                               # or: node server.js
+```
+
+`npm start` runs from the repo root but loads `server/.env` (and then a root `.env` if
+present), so the copy step above is enough. `npm run start -w server` works too.
+
+- **App:** http://localhost:42780
+- **Backend API:** http://localhost:42780/api/v1
+- **Health Check:** http://localhost:42780/health
+- **Readiness (DB):** http://localhost:42780/ready
+- **API Docs:** http://localhost:42780/api-docs (HTTP Basic auth: `admin` / `ADMIN_PASSWORD`)
 
 
 
@@ -51,18 +76,18 @@ employee-work-tracker/
 │   │   ├── server.ts             # Entry point with graceful shutdown
 │   │   ├── middleware/           # Auth, RBAC, validation, compression, caching
 │   │   ├── lib/                  # Config, JWT, time utils, auto-absent, socket, backup
-│   │   ├── db/                   # MySQL connection, schema, migrations, setup
-│   │   ├── modules/              # 15 feature modules (auth, attendance, tasks, etc.)
+│   │   ├── db/                   # MySQL pool, transactions, schema, migrations, bootstrap
+│   │   ├── modules/              # 17 feature modules (auth, attendance, tasks, files, security, etc.)
 │   │   └── types/                # TypeScript type definitions
 │   ├── tests/                    # Frontend Vitest tests
 │   ├── load-tests/               # Artillery load tests
 │   └── package.json
-├── web/                          # Frontend (Next.js 15 + React 19)
+├── web/                          # Frontend (React 19 + Vite 8)
 │   ├── src/
-│   │   ├── app/                  # 19 page routes (App Router)
+│   │   ├── pages/                # 23 page routes (React Router)
 │   │   ├── components/           # Shared UI components (ErrorBoundary, Toast, ConfirmDialog)
 │   │   ├── context/              # AuthContext with JWT refresh
-│   │   ├── lib/                  # API client, socket, utils, location
+│   │   ├── lib/                  # API client, socket, utils, location, env
 │   │   └── types/                # TypeScript interfaces for API responses
 │   └── package.json
 ├── .github/workflows/ci.yml     # CI/CD pipeline
@@ -72,7 +97,7 @@ employee-work-tracker/
 
 ## Features
 
-### Core Modules (14 modules, ~80 API endpoints)
+### Core Modules (17 modules, ~90 API endpoints)
 
 | Module | Description |
 |--------|-------------|
@@ -92,6 +117,8 @@ employee-work-tracker/
 | **Activity Logs** | Complete audit trail for all entity changes |
 | **Analytics** | Attendance trends, department stats, leave usage, task summary |
 | **System** | DB overview, WAL-safe backups, health/readiness probes |
+| **Files** | Upload/download with type and size validation, storage provider switch (local/S3) |
+| **Security** | Password policy, 2FA (TOTP), session/token management |
 
 ### Security Features
 
@@ -104,6 +131,17 @@ employee-work-tracker/
 - **Security Headers:** Helmet (CSP, XSS, HSTS)
 - **CORS:** Configurable origins with credentials
 - **IDOR Prevention:** Users can only access their own data
+
+### Dependency Notes
+
+- `xlsx` (Excel export) has two open advisories with **no npm fix available** (SheetJS
+  publishes fixes outside the registry). The app only **writes** workbooks
+  (`aoa_to_sheet` / `book_append_sheet` / `writeFile` in `web/src/lib/utils.ts`) and never
+  parses a workbook, so the affected parsing code paths are unreachable. Plan: replace with
+  `exceljs` when convenient.
+- `tar` is pulled in by `bcrypt`'s build toolchain (`@mapbox/node-pre-gyp`) and is
+  install-time only. It is pinned to a patched release via the `overrides` entry in
+  `package.json`.
 
 ### UI Features
 
@@ -129,8 +167,8 @@ employee-work-tracker/
 | `npm start` | Production start |
 | `npm run lint` | Lint both packages |
 | `npm run typecheck` | Type check backend |
-| `npm test` | Run frontend tests |
-| `npm run db:seed` | Seed database |
+| `npm test` | Run all tests (server + web) |
+| `npm run setup` | Create schema, apply migrations, seed first admin |
 | `npm run backup` | Manual backup |
 | `npm run backup:list` | List backups |
 
@@ -138,81 +176,194 @@ employee-work-tracker/
 
 | Command | Description |
 |---------|-------------|
-| `npm run dev` | Dev server with hot reload |
-| `npm run build` | TypeScript compilation |
-| `npm test` | Frontend Vitest tests only (no backend tests) |
+| `npm run dev` | Dev server with hot reload (`tsx watch src/server.ts` on :42781) |
+| `npm run build` | TypeScript compilation (`tsc -p tsconfig.build.json`) |
+| `npm test` | Vitest (37 tests, 7 files, ≥35% line coverage enforced) |
 | `npm run test:watch` | Watch mode |
 | `npm run test:coverage` | Coverage report |
-| `npm run lint` | ESLint |
+| `npm run lint` | ESLint (`src/**/*.ts`) |
 | `npm run typecheck` | TypeScript check |
 
 ### Frontend (`web/`)
 
 | Command | Description |
 |---------|-------------|
-| `npm run dev` | Next.js dev server |
-| `npm run build` | Production build |
+| `npm run dev` | Vite dev server (http://localhost:42780, proxy /api → :42781) |
+| `npm run dev:https` | Vite HTTPS for LAN geolocation (trust `web/certs/`) |
+| `npm run build` | Production build (`web/dist`, used by Hostinger) |
 | `npm run lint` | ESLint |
 
 ## API Authentication
 
 ```bash
 # Login
-curl -X POST http://localhost:4000/api/v1/auth/login \
+curl -X POST http://localhost:42780/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@example.com","password":"Admin@123"}'
+  -d '{"email":"admin@power-tech.group","password":"Admin@123456789"}'
 
 # Authenticated request
-curl -X GET http://localhost:4000/api/v1/auth/me \
+curl -X GET http://localhost:42780/api/v1/auth/me \
   -H "Authorization: Bearer <accessToken>"
 ```
 
 ## Testing
 
 ```bash
-# Run all tests
-npm test -w server
-
-# Watch mode
-npm run test:watch -w server
-
-# Coverage
+npm run verify        # everything: typecheck, lint, build, unit + API tests, E2E
+npm test              # Vitest: server (API/integration) + web (unit)
 npm run test:coverage -w server
+npm run test:coverage -w web
+npm run test:e2e      # Playwright (seeds its own data, uses ports 42790/42791)
+npm run test:reset-db # empty the test database by hand
+npm run test:load     # Artillery (requires a local install)
+```
 
-# Load tests (requires Artillery)
-cd server
-npx artillery run load-tests/auth-load-test.yml
+### Test database
+
+Automated tests never touch the development database. They use a separate `hr_test`
+created and **reset before every run** (`server/src/test/global-setup.ts`), so results do
+not depend on leftovers from previous runs. Connection settings come from
+`server/src/test/test-db.ts`:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `TEST_DB_HOST` | `MYSQL_HOST` / 127.0.0.1 | Test database host |
+| `TEST_DB_PORT` | `MYSQL_PORT` / 3306 | Test database port |
+| `TEST_DB_USER` | `MYSQL_USER` / root | Test database user |
+| `TEST_DB_PASSWORD` | `MYSQL_PASSWORD` / *(empty)* | Test database password |
+| `TEST_DB_NAME` | `hr_test` | Test database name (protected DBs are refused) |
+
+Locally the values fall back to `server/.env`, so no configuration is needed. In CI they
+are set explicitly (see `.github/workflows/ci.yml`).
+
+### E2E
+
+Playwright starts its own API (`:42791`) and Vite server (`:42790`), so it can run while
+the real app stays on `:42780`. `web/e2e/global-setup.ts` resets `hr_test` and seeds
+`e2e-director@example.com` before the specs run.
+
+### Load tests
+
+```bash
+npm run test:load                        # auth scenario
+npx artillery run server/load-tests/tasks-load-test.yml
 ```
 
 ## Deployment
 
-### Docker
+The primary supported setup is **localhost** (see Quick Start). Docker Compose and
+Railway are supported for hosted deployments; PM2 is available for a plain VM.
+
+### Docker (localhost, no public exposure)
 
 ```bash
-cd server
-docker-compose up -d
+cp .env.example .env
+# edit .env: MYSQL_ROOT_PASSWORD, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, ADMIN_*
+docker compose up -d --build
+curl -s http://localhost:42780/ready
 ```
+
+`docker compose up` starts MySQL and the API (which also serves `web/dist` from
+`server/Dockerfile`). Stop with `docker compose down`.
+
+### Railway
+
+`railway.json` pins the builder to `server/Dockerfile` and the healthcheck to `/ready`.
+The Dockerfile builds the API and `web/dist`, then serves both from one origin, and
+installs `mysql-client` for backups.
+
+1. Create a Railway project and add a **MySQL** service. Use a **fresh/empty database**;
+   the app creates `schema.sql` and applies migrations 1-19 on first boot.
+   Do **not** point `DATABASE_URL` at a copy of an older/newer database (for example a
+   local `hr` that already has multi-tenant `org_id` columns or migration 19 from
+   another branch) — that schema is not compatible with this code.
+2. Add this app service from the repository with root directory = repo root.
+   `railway.json` selects `server/Dockerfile`; no Railpack configuration is needed.
+3. Set the healthcheck path to `/ready` and replicas to `1`. Set the service target
+   port to `42780` to match `PORT` below.
+4. Add a volume mounted at `/data` (uploads/backups) and set `RAILWAY_RUN_UID=0` so the
+   container user can write to it.
+5. Add the environment variables below. `DATABASE_URL` is the only database variable
+   required; Railway's MySQL plugin exposes `MYSQL_URL`:
+
+   ```text
+   NODE_ENV=production
+   HOST=0.0.0.0
+   PORT=42780
+   SERVE_STATIC=true
+   TRUST_PROXY=1
+   COOKIE_SECURE=true
+   COOKIE_SAME_SITE=strict
+   APP_TIMEZONE=Asia/Kolkata
+   DATABASE_URL=${{MySQL.MYSQL_URL}}
+   JWT_ACCESS_SECRET=<48 random bytes, base64>
+   JWT_REFRESH_SECRET=<48 random bytes, base64>
+   ADMIN_EMAIL=<admin email>
+   ADMIN_PASSWORD=<at least 12 characters, not the default>
+   APP_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
+   CORS_ORIGIN=https://${{RAILWAY_PUBLIC_DOMAIN}}
+   UPLOAD_DIR=/data/uploads
+   BACKUP_DIR=/data/backup
+   ENABLE_API_DOCS=false
+   ```
+
+   Generate the JWT secrets with
+   `node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"`.
+   Do **not** set `API_PORT`; it overrides `PORT`. If you use a custom domain, set
+   `APP_URL`/`CORS_ORIGIN` to that origin. Keep `COOKIE_SAME_SITE=strict` for the
+   single-origin setup; only use `none` (with `COOKIE_SECURE=true`) if you split the
+   frontend and API across different sites. `APP_TIMEZONE` controls "today", attendance
+   dates and scheduled jobs.
+
+Migrations run automatically on startup. The app is not marked ready until
+`schema_migrations` reaches version 19 and the core tables exist, so a failed
+migration fails the Railway healthcheck instead of serving broken requests.
+
+Production email and backups are configuration-gated:
+
+- Set `EMAIL_ENABLED=true` plus `SMTP_*` to deliver password-reset and notification
+  email. Without SMTP, those emails are skipped and in-app notifications still work.
+- Backups are created on demand by `npm run backup` or the director-only
+  `POST /api/v1/system/backup` endpoint. The app does not run a backup cron; use
+  Railway cron, a platform scheduler, or an external job against `/data/backup`.
+- Set `ENABLE_API_DOCS=true` only when you need Swagger. `/api-docs` then requires
+  HTTP Basic auth with username `admin` and the configured `ADMIN_PASSWORD`.
 
 ### PM2
 
 ```bash
-pm2 start ecosystem.config.js
+pm2 start ecosystem.config.js   # PORT 42780 (dev) / production
 pm2 save
 pm2 startup
 ```
-
-### Nginx
-
-See `deployment.md` for full Nginx reverse proxy configuration with SSL.
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NODE_ENV` | development | Environment mode |
-| `PORT` | 4000 | API server port |
-| `CORS_ORIGIN` | http://localhost:3000 | Allowed CORS origins |
-| `DATABASE_PATH` | data.db | SQLite database file |
+| `PORT` | 42780 | The single app port (API + frontend on one origin); Railway injects it |
+| `HOST` | 127.0.0.1 (dev) / 0.0.0.0 (production) | Bind address |
+| `API_PORT` | (empty) | Overrides `PORT`; do not set it on Railway |
+| `CORS_ORIGIN` | http://localhost:42780 | Allowed CORS origins — set to your public origin when exposed |
+| `APP_URL` | http://localhost:42780 | Public app URL used in emails/links |
+| `TRUST_PROXY` | 0 | Set to `1` behind Railway/nginx |
+| `COOKIE_SECURE` | false (true in production) | Require HTTPS for auth cookies |
+| `COOKIE_SAME_SITE` | strict | `strict`, `lax`, or `none`; `none` requires `COOKIE_SECURE=true` |
+| `APP_TIMEZONE` | Asia/Kolkata | IANA timezone for business dates/attendance/scheduled jobs |
+| `ENABLE_API_DOCS` | false in production | Expose `/api-docs` with HTTP Basic auth (`admin` / `ADMIN_PASSWORD`) |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | (empty) | First-run admin bootstrap; required in production |
+| `UPLOAD_DIR` | uploads | File storage directory; use a persistent volume in production |
+| `BACKUP_DIR` | backup | `mysqldump` output directory |
+| `EMAIL_ENABLED` | auto | `true`/`false`; auto-enables when `SMTP_HOST` and `SMTP_USER` are set |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | (empty) | Optional outbound email for password reset and notifications |
+| `SERVE_STATIC` | false | Serve `web/dist` from Express |
+| `MYSQL_HOST` | localhost | MySQL host |
+| `MYSQL_PORT` | 3306 | MySQL port |
+| `MYSQL_USER` | root | MySQL user |
+| `MYSQL_PASSWORD` | (empty) | MySQL password |
+| `MYSQL_DATABASE` | hr | MySQL database name |
+| `DATABASE_URL` | (empty) | MySQL connection URL (overrides MYSQL_* vars) |
 | `JWT_ACCESS_SECRET` | (auto-generated) | Access token signing key |
 | `JWT_REFRESH_SECRET` | (auto-generated) | Refresh token signing key |
 | `JWT_ACCESS_TTL` | 15m | Access token expiry |
@@ -220,6 +371,16 @@ See `deployment.md` for full Nginx reverse proxy configuration with SSL.
 | `MAX_LOGIN_ATTEMPTS` | 5 | Lockout threshold |
 | `LOCKOUT_MINUTES` | 15 | Lockout duration |
 | `ENABLE_HTTPS` | false | Self-signed HTTPS |
+
+## Security notes
+
+- `npm audit --omit=dev` reports **0 vulnerabilities** for the deployed dependency tree.
+- The frontend uses `xlsx` only to *write* export files (never parses untrusted
+  spreadsheets); it is pinned to the patched SheetJS 0.20.3 build from the official CDN.
+- Remaining advisories are dev-only (`vitest`/`tinypool`); fixing them requires a major
+  test-runner upgrade and does not affect the production image.
+- `server/.env` is excluded from Docker/Railway build contexts. Set secrets through the
+  platform's environment variables instead.
 
 ## License
 

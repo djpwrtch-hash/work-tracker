@@ -2,39 +2,44 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
     branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   server:
     name: Server
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     services:
       mysql:
         image: mysql:8.0
         env:
-          MYSQL_ROOT_PASSWORD: testroot
-          MYSQL_DATABASE: hr
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: hr_test
         ports:
           - 3306:3306
-        options: --health-cmd="mysqladmin ping -h localhost -u root -ptestroot" --health-interval=10s --health-timeout=5s --health-retries=10 --health-start-period=30s
+        options: --health-cmd="mysqladmin ping -h localhost -u root -proot" --health-interval=10s --health-timeout=5s --health-retries=5
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use Node.js 24
+      - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
       - name: Type check (server)
-        run: npm run typecheck
+        run: npm run typecheck -w server
 
       - name: Lint (server)
         run: npm run lint -w server
@@ -42,47 +47,41 @@ jobs:
       - name: Build (server)
         run: npm run build -w server
 
-      - name: Wait for MySQL
-        run: |
-          echo "Waiting for MySQL to be ready..."
-          for i in {1..60}; do
-            if mysqladmin ping -h 127.0.0.1 -P 3306 -u root -ptestroot --silent 2>/dev/null; then
-              echo "MySQL is ready"
-              break
-            fi
-            echo "Waiting... $i/60"
-            sleep 2
-          done
-          mysqladmin ping -h 127.0.0.1 -P 3306 -u root -ptestroot --silent || (echo "MySQL not ready" && exit 1)
-
-      - name: Setup test database
-        run: npm run setup
+      - name: Run tests with coverage (server)
+        run: npm run test:coverage -w server
         env:
-          MYSQL_HOST: 127.0.0.1
-          MYSQL_PORT: 3306
-          MYSQL_USER: root
-          MYSQL_PASSWORD: testroot
-          MYSQL_DATABASE: hr
-          JWT_ACCESS_SECRET: test-access-secret-32-chars-long-please
-          JWT_REFRESH_SECRET: test-refresh-secret-32-chars-long-please
+          # The test harness (server/src/test/test-db.ts) reads these; it always uses
+          # the hr_test database and never the development one.
+          TEST_DB_HOST: 127.0.0.1
+          TEST_DB_PORT: '3306'
+          TEST_DB_USER: root
+          TEST_DB_PASSWORD: root
+          TEST_DB_NAME: hr_test
+          JWT_ACCESS_SECRET: test-access-secret-32chars-min-abc123XYZ!
+          JWT_REFRESH_SECRET: test-refresh-secret-32chars-min-xyz789ABC!
           ADMIN_EMAIL: test@example.com
           ADMIN_PASSWORD: TestPassword123!
 
-      - name: Run tests
-        run: npm --workspace server run test 2>&1 || echo "no server tests — skipping"
-        continue-on-error: false
+      - name: Upload server coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-coverage
+          path: server/coverage
+          retention-days: 7
 
   web:
     name: Frontend
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use Node.js 24
+      - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: 'npm'
 
       - name: Install dependencies
@@ -96,3 +95,25 @@ jobs:
 
       - name: Build (web)
         run: npm run build -w web
+
+      - name: Run tests with coverage (web)
+        run: npm run test:coverage -w web
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build server image (server + web single-origin)
+        run: docker build -f server/Dockerfile -t worktracker-server:ci .
+
+      - name: Verify image health contract
+        run: |
+          docker inspect worktracker-server:ci --format '{{json .Config.Healthcheck}}' | grep -q 'ready' \
+            || (echo 'HEALTHCHECK missing or not probing /ready' && exit 1)
+
+      - name: Build web image
+        run: docker build -f web/Dockerfile -t worktracker-web:ci ./web

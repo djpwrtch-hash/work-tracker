@@ -12,10 +12,15 @@
 
 # testing
 /coverage
+/test-results/
+/playwright-report/
 
-# next.js
+# next.js (legacy, kept for compat)
 /.next/
 /out/
+!/out/.gitkeep
+/dist/
+!/dist/.gitkeep
 
 # production
 /build
@@ -33,6 +38,7 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env
 .env.local
+.env.production
 
 # vercel
 .vercel

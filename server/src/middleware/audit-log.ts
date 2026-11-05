@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import db, { uuid } from '../db';
+import db, { uuid } from '../db/index.js';
 
 export function auditLog() {
   return (req: Request, res: Response, next: NextFunction) => {

@@ -1,8 +1,6 @@
-'use client';
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { Link } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getInitials, displayRole } from '../lib/utils';
 import NotificationBell from './NotificationBell';
@@ -22,7 +20,7 @@ const Sidebar = ({ mobile = false, nav, pathname, handleMobileClose, user, logou
       {nav.filter((n) => n.show).map((n) => {
         const active = pathname === n.href || pathname.startsWith(n.href + '/');
         return (
-          <Link key={n.name} href={n.href} onClick={mobile ? handleMobileClose : undefined}
+            <Link key={n.name} to={n.href} onClick={mobile ? handleMobileClose : undefined}
             className={`flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl transition ${active ? 'bg-violet-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
             aria-label={n.name}
             aria-current={active ? 'page' : undefined}>
@@ -50,7 +48,7 @@ const Sidebar = ({ mobile = false, nav, pathname, handleMobileClose, user, logou
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
-  const pathname = usePathname();
+  const { pathname } = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [pageTitle, setPageTitle] = useState('');
 

@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { cache } from '../lib/cache';
+import { cache } from '../lib/cache.js';
 
 interface ApiCacheOptions {
   ttl: number;
@@ -14,7 +14,8 @@ export function apiCache(options: ApiCacheOptions) {
       if (options.condition && !options.condition(req)) return next();
       if (req.headers['cache-control']?.includes('no-cache') || req.headers['cache-control']?.includes('no-store')) return next();
 
-      const cacheKey = options.key?.(req) || `${(req as any).user?.sub || (req as any).user?.role || 'anon'}:${req.originalUrl}`;
+      const user = (req as any).user;
+      const cacheKey = options.key?.(req) || `${user?.sub || 'anon'}:${user?.role || 'none'}:${req.originalUrl}`;
       const cached = await cache.get(cacheKey);
 
       if (cached !== undefined) {

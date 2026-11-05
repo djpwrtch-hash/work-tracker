@@ -50,6 +50,7 @@ const money = z.coerce.number().min(0, 'Amount cannot be negative').default(0);
 export const documentFieldSchemas: Record<DocType, z.ZodTypeAny> = {
   appointment_letter: z.object({
     employeeName: z.string().trim().min(1, 'Employee name is required'),
+    gender: z.enum(['male', 'female', 'other']).optional(),
     employeeId: z.string().trim().optional(),
     designation: z.string().trim().min(1, 'Designation is required'),
     department: z.string().trim().optional(),
@@ -68,6 +69,7 @@ export const documentFieldSchemas: Record<DocType, z.ZodTypeAny> = {
   }),
   experience_certificate: z.object({
     employeeName: z.string().trim().min(1, 'Employee name is required'),
+    gender: z.enum(['male', 'female', 'other']).optional(),
     fatherName: z.string().trim().optional(),
     designation: z.string().trim().min(1, 'Designation is required'),
     department: z.string().trim().optional(),
@@ -84,6 +86,7 @@ export const documentFieldSchemas: Record<DocType, z.ZodTypeAny> = {
   }),
   internship_certificate: z.object({
     internName: z.string().trim().min(1, 'Intern name is required'),
+    gender: z.enum(['male', 'female', 'other']).optional(),
     institution: z.string().trim().min(1, 'Institution/college name is required'),
     registrationNumber: z.string().trim().optional(),
     fatherName: z.string().trim().optional(),
@@ -97,6 +100,7 @@ export const documentFieldSchemas: Record<DocType, z.ZodTypeAny> = {
   }),
   leaving_certificate: z.object({
     employeeName: z.string().trim().min(1, 'Employee name is required'),
+    gender: z.enum(['male', 'female', 'other']).optional(),
     employeeId: z.string().trim().optional(),
     designation: z.string().trim().optional(),
     department: z.string().trim().optional(),

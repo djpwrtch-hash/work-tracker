@@ -1,4 +1,4 @@
-import db from '../db';
+import db from '../db/index.js';
 
 const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
 

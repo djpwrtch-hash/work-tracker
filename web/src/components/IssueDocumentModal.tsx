@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import Modal from '@/components/Modal';
@@ -8,6 +8,7 @@ import { api } from '@/lib/api';
 import {
   DOC_TEMPLATES,
   documentPdfPreviewUrl,
+  documentPdfPreviewBlobUrl,
   DEFAULT_APPOINTMENT_RESPONSIBILITIES,
   DEFAULT_APPOINTMENT_TERMS,
   DEFAULT_EXPERIENCE_PROJECT_REMARKS,
@@ -125,19 +126,29 @@ export default function IssueDocumentModal({ doc, onClose }: IssueDocumentModalP
     return null;
   }, [fields.employeeName, fields.gender]);
 
-  const previewUrl = useMemo(() => {
-    if (!showPreview) return null;
-    try {
-      return documentPdfPreviewUrl({
-        docType: doc.docType,
-        fields,
-        docNumber: 'PREVIEW',
-        issueDate: new Date().toISOString(),
-        issuedBy: null,
-      });
-    } catch {
-      return null;
+  const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let url: string | null = null;
+    if (showPreview) {
+      try {
+        url = documentPdfPreviewBlobUrl({
+          docType: doc.docType,
+          fields,
+          docNumber: 'PREVIEW',
+          issueDate: new Date().toISOString(),
+          issuedBy: null,
+        });
+        setPreviewBlobUrl(url);
+      } catch {
+        setPreviewBlobUrl(null);
+      }
+    } else {
+      setPreviewBlobUrl(null);
     }
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
   }, [showPreview, doc.docType, fields]);
 
   const issueMutation = useMutation({
@@ -206,8 +217,8 @@ export default function IssueDocumentModal({ doc, onClose }: IssueDocumentModalP
 
         {showPreview && (
           <div className="rounded-xl overflow-hidden border border-slate-700 bg-slate-800">
-            {previewUrl ? (
-              <iframe src={previewUrl} title="Document preview" className="w-full h-[420px]" />
+            {previewBlobUrl ? (
+              <iframe src={previewBlobUrl} title="Document preview" className="w-full h-[420px]" />
             ) : (
               <p className="p-4 text-sm text-slate-400">Preview could not be generated.</p>
             )}

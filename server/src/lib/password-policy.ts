@@ -1,4 +1,4 @@
-import db from '../db';
+import db from '../db/index.js';
 
 export interface PasswordPolicy {
   minLength: number;
@@ -130,7 +130,7 @@ export async function updatePasswordPolicy(updates: Partial<PasswordPolicy>): Pr
       `UPDATE password_policies SET
         min_length = ?, require_uppercase = ?, require_lowercase = ?,
         require_number = ?, require_special = ?, max_age_days = ?,
-        history_count = ?, updated_at = datetime('now')
+        history_count = ?, updated_at = NOW()
       WHERE id = ?`
     ).run(
       merged.minLength,

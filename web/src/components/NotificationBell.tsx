@@ -1,7 +1,5 @@
-'use client';
-
 import { useState, useEffect, useRef, useCallback } from 'react';
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { listenOnSocket } from '@/lib/socket';
 import { api } from '@/lib/api';
@@ -17,7 +15,7 @@ interface Notification {
   title: string;
   message: string;
   link?: string;
-  read: boolean;
+  isRead: boolean;
   createdAt: string;
 }
 
@@ -49,18 +47,18 @@ function NotificationItem({ n, onRead }: { n: Notification; onRead: (id: string)
   const { icon: Icon, color } = NOTIFICATION_ICONS[n.type] ?? NOTIFICATION_ICONS.info;
   return (
     <div
-      onClick={() => !n.read && onRead(n.id)}
-      className={`flex items-start gap-3 px-4 py-3 cursor-pointer transition hover:bg-slate-800/60 ${!n.read ? 'bg-violet-500/5' : ''}`}
+      onClick={() => !n.isRead && onRead(n.id)}
+      className={`flex items-start gap-3 px-4 py-3 cursor-pointer transition hover:bg-slate-800/60 ${!n.isRead ? 'bg-violet-500/5' : ''}`}
     >
       <div className={`flex-shrink-0 h-8 w-8 rounded-lg bg-slate-800 flex items-center justify-center ${color}`}>
         <Icon className="h-4 w-4" />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2">
-          <p className={`text-sm font-medium truncate ${!n.read ? 'text-white' : 'text-slate-300'}`}>
+          <p className={`text-sm font-medium truncate ${!n.isRead ? 'text-white' : 'text-slate-300'}`}>
             {n.title}
           </p>
-          {!n.read && <span className="flex-shrink-0 h-2 w-2 rounded-full bg-violet-500 mt-1.5" />}
+          {!n.isRead && <span className="flex-shrink-0 h-2 w-2 rounded-full bg-violet-500 mt-1.5" />}
         </div>
         <p className="text-xs text-slate-500 line-clamp-2 mt-0.5">{n.message}</p>
         <p className="text-xs text-slate-600 mt-1">{timeAgo(n.createdAt)}</p>
@@ -95,7 +93,7 @@ export default function NotificationBell() {
   useEffect(() => {
     const off = listenOnSocket({
       'notification:new': (n: Notification) => {
-        setLocalNotifications((prev) => [n, ...prev].slice(0, 20));
+        setLocalNotifications((prev) => [{ ...n, isRead: false }, ...prev].slice(0, 20));
         setUnread((prev) => prev + 1);
       },
     });
@@ -116,7 +114,7 @@ export default function NotificationBell() {
     try {
       await api.post(`/notifications/${id}/read`);
       setLocalNotifications((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, read: true } : n))
+        prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
       );
       setUnread((prev) => Math.max(0, prev - 1));
       qc.invalidateQueries({ queryKey: ['notifications'] });
@@ -126,7 +124,7 @@ export default function NotificationBell() {
   const markAllRead = useCallback(async () => {
     try {
       await api.post('/notifications/read-all');
-      setLocalNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      setLocalNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
       setUnread(0);
       qc.invalidateQueries({ queryKey: ['notifications'] });
     } catch { /* ignore */ }
@@ -186,7 +184,7 @@ export default function NotificationBell() {
 
           <div className="border-t border-slate-800 px-4 py-2.5">
             <Link
-              href="/notifications"
+              to="/notifications"
               onClick={() => setOpen(false)}
               className="block text-center text-xs font-medium text-violet-400 hover:text-violet-300 transition"
             >

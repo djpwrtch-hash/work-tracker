@@ -1,11 +1,11 @@
 import { Router, Request, Response } from 'express';
-import { validate, requireUuid } from '../../middleware/validate';
-import { authenticate } from '../../middleware/authenticate';
-import { requireRole } from '../../middleware/rbac';
-import { apiCache } from '../../middleware/api-cache';
-import { cache } from '../../lib/cache';
-import { createHolidaySchema, deleteHolidaySchema, listHolidaysSchema } from './holidays.schema';
-import { HolidaysService } from './holidays.service';
+import { validate, requireUuid } from '../../middleware/validate.js';
+import { authenticate } from '../../middleware/authenticate.js';
+import { requireRole } from '../../middleware/rbac.js';
+import { apiCache } from '../../middleware/api-cache.js';
+import { cache } from '../../lib/cache.js';
+import { createHolidaySchema, deleteHolidaySchema, listHolidaysSchema } from './holidays.schema.js';
+import { HolidaysService } from './holidays.service.js';
 
 const router = Router();
 

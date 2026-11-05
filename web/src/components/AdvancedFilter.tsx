@@ -32,7 +32,6 @@ export default function AdvancedFilter({ filters, onFilterChange, onClear }: Adv
 
   useEffect(() => {
     setLocalFilters(filters.reduce((acc, f) => ({ ...acc, [f.id]: f.value }), {}));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterSignature]);
 
   const handleFilterChange = (id: string, value: any) => {

@@ -1,7 +1,7 @@
-import db, { uuid } from '../../db';
-import { AppError } from '../../lib/app-error';
-import { getISTDate } from '../../lib/time';
-import { sendTaskAssignment } from '../../lib/email';
+import db, { uuid } from '../../db/index.js';
+import { AppError } from '../../lib/app-error.js';
+import { getISTDate } from '../../lib/time.js';
+import { sendTaskAssignment } from '../../lib/email.js';
 
 function mapTask(t: any) {
   return {
@@ -137,7 +137,7 @@ export class TasksService {
         if (blocked.length > 0) throw new AppError(403, `Employees cannot update: ${blocked.join(', ')}`);
       }
 
-      const sets = ["updated_at = datetime('now')"]; const params: any[] = [];
+      const sets = ["updated_at = NOW()"]; const params: any[] = [];
       if (input.title) { sets.push('title = ?'); params.push(input.title); }
       if (input.description !== undefined) { sets.push('description = ?'); params.push(input.description); }
       if (input.priority) { sets.push('priority = ?'); params.push(input.priority); }
@@ -154,8 +154,8 @@ export class TasksService {
           throw new AppError(400, `Invalid status transition: ${current} -> ${input.status}`);
         }
         sets.push('status = ?'); params.push(input.status);
-        if (input.status === 'in_progress' && !existing.started_at) sets.push("started_at = datetime('now')");
-        if (input.status === 'completed' && current !== 'completed') { sets.push("completed_at = datetime('now')"); }
+        if (input.status === 'in_progress' && !existing.started_at) sets.push("started_at = NOW()");
+        if (input.status === 'completed' && current !== 'completed') { sets.push("completed_at = NOW()"); }
         if (input.status !== 'completed') sets.push('completed_at = NULL');
         if (input.status === 'pending') sets.push('started_at = NULL');
       }
@@ -242,7 +242,7 @@ export class TasksService {
       if (!a) throw new AppError(404, 'Approval not found');
       if (a.status !== 'pending') throw new AppError(409, 'Already reviewed');
       if (a.requested_by_id === reviewedById) throw new AppError(403, 'Cannot review your own approval request');
-      const result = await db.prepare("UPDATE task_approvals SET status = ?, reviewed_by_id = ?, comment = ?, reviewed_at = datetime('now') WHERE id = ? AND status = 'pending'").run(status, reviewedById, comment ?? null, approvalId);
+      const result = await db.prepare("UPDATE task_approvals SET status = ?, reviewed_by_id = ?, comment = ?, reviewed_at = NOW() WHERE id = ? AND status = 'pending'").run(status, reviewedById, comment ?? null, approvalId);
       if (result.changes === 0) throw new AppError(409, 'Already reviewed');
       await db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .run(uuid(), a.requested_by_id, reviewedById, `Task ${status}`, `Your task approval has been ${status}`, status === 'approved' ? 'success' : 'warning', `/tasks/${a.task_id}`);

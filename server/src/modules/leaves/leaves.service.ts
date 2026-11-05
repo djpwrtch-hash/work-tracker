@@ -1,9 +1,9 @@
-import db, { uuid } from '../../db';
-import { getIO } from '../../lib/socket';
-import { getISTDate, isSundayIST, parseUTC } from '../../lib/time';
-import { cache } from '../../lib/cache';
-import { AppError } from '../../lib/app-error';
-import { sendLeaveNotification } from '../../lib/email';
+import db, { uuid } from '../../db/index.js';
+import { getIO } from '../../lib/socket.js';
+import { getISTDate, getISTYear, isSundayIST, parseUTC } from '../../lib/time.js';
+import { cache } from '../../lib/cache.js';
+import { AppError } from '../../lib/app-error.js';
+import { sendLeaveNotification, isEmailConfigured } from '../../lib/email.js';
 
 const LEAVE_BALANCES: Record<'casual' | 'sick' | 'proposal', number> = { casual: 8, sick: 8, proposal: 16 };
 const ANNUAL_LEAVE_ALLOWANCE = LEAVE_BALANCES.casual + LEAVE_BALANCES.sick + LEAVE_BALANCES.proposal; // 32 days per year
@@ -50,10 +50,21 @@ function mapLeave(l: any) {
   };
 }
 
-function iterDates(start: string, end: string): string[] {
+function dateOnly(value: string | Date): string {
+  if (value instanceof Date) {
+    if (isNaN(value.getTime())) return '';
+    return value.toISOString().slice(0, 10);
+  }
+  return String(value ?? '').slice(0, 10);
+}
+
+function iterDates(start: string | Date, end: string | Date): string[] {
   const dates: string[] = [];
-  const cur = new Date(`${start}T00:00:00Z`);
-  const endD = new Date(`${end}T00:00:00Z`);
+  const startIso = dateOnly(start);
+  const endIso = dateOnly(end);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startIso) || !/^\d{4}-\d{2}-\d{2}$/.test(endIso)) return dates;
+  const cur = new Date(`${startIso}T00:00:00Z`);
+  const endD = new Date(`${endIso}T00:00:00Z`);
   while (cur <= endD) {
     dates.push(cur.toISOString().split('T')[0]!);
     cur.setUTCDate(cur.getUTCDate() + 1);
@@ -113,8 +124,10 @@ async function workingDates(userId: string, start: string, end: string): Promise
   return dates;
 }
 
-function yearOf(date: string): number {
-  return new Date(`${date}T00:00:00Z`).getUTCFullYear();
+function yearOf(date: string | Date): number {
+  const iso = dateOnly(date);
+  const year = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? new Date(`${iso}T00:00:00Z`).getUTCFullYear() : NaN;
+  return Number.isNaN(year) ? getISTYear() : year;
 }
 
 async function daysWithinYear(userId: string, start: string, end: string, year: number, holidayCache?: Map<string, any[]>): Promise<number> {
@@ -211,7 +224,6 @@ export class LeavesService {
       const overlap = await db.prepare("SELECT id FROM leaves WHERE user_id = ? AND status IN ('pending', 'approved') AND NOT (end_date < ? OR start_date > ?)").get(userId, startDate, endDate);
       if (overlap) throw new AppError(409, 'Leave request overlaps with existing leave');
       const id = uuid();
-
       let extra = 0;
       let workingDays: string[] = [];
       if (isAutoApprove) {
@@ -234,7 +246,7 @@ export class LeavesService {
           params.push(notes);
           await db.prepare(`INSERT INTO attendance (id, user_id, date, status, notes)
             VALUES ${placeholders}
-            ON CONFLICT(user_id, date) DO UPDATE SET status = CASE WHEN attendance.status IN ${PROTECTED_STATUSES} THEN attendance.status ELSE 'leave' END, notes = CASE WHEN attendance.status IN ${PROTECTED_STATUSES} THEN attendance.notes ELSE ? END, updated_at = datetime('now')`).run(...params);
+            ON DUPLICATE KEY UPDATE status = CASE WHEN attendance.status IN ${PROTECTED_STATUSES} THEN attendance.status ELSE 'leave' END, notes = CASE WHEN attendance.status IN ${PROTECTED_STATUSES} THEN attendance.notes ELSE ? END, updated_at = NOW()`).run(...params);
         }
         invalidateAnalyticsCache();
 
@@ -250,12 +262,17 @@ export class LeavesService {
         for (const a of admins) {
           await insertNotif.run(uuid(), a.id, userId, 'Leave Requested', `${input.type} leave request pending review`, 'approval', `/leaves/${id}`);
         }
-        for (const a of admins) {
-          try { await sendLeaveNotification({ id, type: input.type, startDate, endDate, reason: input.reason ?? undefined }, 'submitted', { id: a.id, email: a.email, firstName: a.first_name, lastName: a.last_name }); } catch (e: any) { console.error('[Email] Failed:', e.message); }
-        }
       }
       return mapLeave(await db.prepare('SELECT l.*, u.first_name, u.last_name, u.employee_id FROM leaves l JOIN users u ON l.user_id = u.id WHERE l.id = ?').get(id));
     }))();
+    if (!isAutoApprove && isEmailConfigured()) {
+      // Emails AFTER commit: gated by isEmailConfigured() — notifications are
+      // the primary channel; email is optional (no SMTP = silently skipped).
+      const notifyAdmins = (await db.prepare("SELECT id, email, first_name, last_name FROM users WHERE role IN ('director', 'hr')").all()) as any[];
+      for (const a of notifyAdmins) {
+        try { await sendLeaveNotification({ id: leaveRecord.id, type: input.type, startDate, endDate, reason: input.reason ?? undefined }, 'submitted', { id: a.id, email: a.email, firstName: a.first_name, lastName: a.last_name }); } catch (e: any) { console.error('[Email] Failed:', e.message); }
+      }
+    }
 
     if (isAutoApprove) await cache.delByPrefix(`${userId}:/api/v1/leaves/balance`);
 
@@ -391,7 +408,7 @@ export class LeavesService {
         leaveYear = yearOf(leave.start_date);
         extra = await computeRequestExtra(leave.user_id, leaveYear, dates.length);
       }
-      await db.prepare("UPDATE leaves SET status = ?, review_comment = ?, reviewed_by_id = ?, reviewed_at = datetime('now'), leave_year = COALESCE(?, leave_year), extra = CASE WHEN ? = 'approved' THEN ? ELSE extra END, updated_at = datetime('now') WHERE id = ?")
+      await db.prepare("UPDATE leaves SET status = ?, review_comment = ?, reviewed_by_id = ?, reviewed_at = NOW(), leave_year = COALESCE(?, leave_year), extra = CASE WHEN ? = 'approved' THEN ? ELSE extra END, updated_at = NOW() WHERE id = ?")
         .run(status, comments ?? null, reviewedById, leaveYear, status, extra, id);
 
       // When approved, create attendance records for each working date
@@ -407,19 +424,21 @@ export class LeavesService {
           params.push(notes);
           await db.prepare(`INSERT INTO attendance (id, user_id, date, status, notes)
             VALUES ${placeholders}
-            ON CONFLICT(user_id, date) DO UPDATE SET status = CASE WHEN attendance.status IN ${PROTECTED_STATUSES} THEN attendance.status ELSE 'leave' END, notes = CASE WHEN attendance.status IN ${PROTECTED_STATUSES} THEN attendance.notes ELSE ? END, updated_at = datetime('now')`).run(...params);
+            ON DUPLICATE KEY UPDATE status = CASE WHEN attendance.status IN ${PROTECTED_STATUSES} THEN attendance.status ELSE 'leave' END, notes = CASE WHEN attendance.status IN ${PROTECTED_STATUSES} THEN attendance.notes ELSE ? END, updated_at = NOW()`).run(...params);
         }
         invalidateAnalyticsCache();
       }
 
       await db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .run(uuid(), leave.user_id, reviewedById, `Leave ${status}`, `Your ${leave.type} leave has been ${status}`, status === 'approved' ? 'success' : 'warning', `/leaves/${id}`);
-
+    })();
+    // Email AFTER commit — optional: skipped when SMTP not configured; notifications are primary.
+    if (isEmailConfigured()) {
       const employee = await db.prepare('SELECT id, email, first_name, last_name FROM users WHERE id = ?').get(leave.user_id) as any;
       if (employee) {
         try { await sendLeaveNotification({ id: leave.id, type: leave.type, startDate: leave.start_date, endDate: leave.end_date, reason: leave.reason ?? undefined }, status as 'approved' | 'rejected', { id: employee.id, email: employee.email, firstName: employee.first_name, lastName: employee.last_name }); } catch (e: any) { console.error('[Email] Failed:', e.message); }
       }
-    })();
+    }
     await cache.delByPrefix(`${leave.user_id}:/api/v1/leaves/balance`);
     const updated = mapLeave(await db.prepare('SELECT l.*, u.first_name, u.last_name, u.employee_id FROM leaves l JOIN users u ON l.user_id = u.id WHERE l.id = ?').get(id));
     try { getIO().to(`user:${leave.user_id}`).emit('leave:reviewed', updated); } catch (e) { console.error('[Leaves] Socket emit failed:', e); }
@@ -447,10 +466,12 @@ export class LeavesService {
     }
 
     const result = await db.transaction(async () => {
-      await db.prepare("UPDATE leaves SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?").run(id);
+      await db.prepare("UPDATE leaves SET status = 'cancelled', updated_at = NOW() WHERE id = ?").run(id);
       const dates = iterDates(leave.start_date, leave.end_date);
-      const placeholders = dates.map(() => '?').join(',');
-      await db.prepare(`UPDATE attendance SET status = 'absent', notes = NULL, updated_at = datetime('now') WHERE user_id = ? AND status = 'leave' AND date IN (${placeholders})`).run(leave.user_id, ...dates);
+      if (dates.length > 0) {
+        const placeholders = dates.map(() => '?').join(',');
+        await db.prepare(`UPDATE attendance SET status = 'absent', notes = NULL, updated_at = NOW() WHERE user_id = ? AND status = 'leave' AND date IN (${placeholders})`).run(leave.user_id, ...dates);
+      }
       invalidateAnalyticsCache();
       await db.prepare("INSERT INTO activity_logs (id, actor_id, action, entity_type, entity_id, old_values, new_values, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
         .run(uuid(), userId, 'cancel_leave', 'leave', id, JSON.stringify({ status: leave.status }), JSON.stringify({ status: 'cancelled' }), null);

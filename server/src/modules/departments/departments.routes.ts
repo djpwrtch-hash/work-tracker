@@ -1,11 +1,11 @@
 import { Router, Request, Response } from 'express';
-import { validate, requireUuid } from '../../middleware/validate';
-import { authenticate } from '../../middleware/authenticate';
-import { requireRole } from '../../middleware/rbac';
-import { apiCache } from '../../middleware/api-cache';
-import { cache } from '../../lib/cache';
-import { createDepartmentSchema, updateDepartmentSchema } from './departments.schema';
-import { DepartmentsService } from './departments.service';
+import { validate, requireUuid } from '../../middleware/validate.js';
+import { authenticate } from '../../middleware/authenticate.js';
+import { requireRole } from '../../middleware/rbac.js';
+import { apiCache } from '../../middleware/api-cache.js';
+import { cache } from '../../lib/cache.js';
+import { createDepartmentSchema, updateDepartmentSchema } from './departments.schema.js';
+import { DepartmentsService } from './departments.service.js';
 
 const router = Router();
 

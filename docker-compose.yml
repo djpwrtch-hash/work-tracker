@@ -1,13 +1,9 @@
-version: '3.8'
-
 services:
   db:
     image: mysql:8.0
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-hr}
-    ports:
-      - "3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
     restart: unless-stopped
@@ -20,13 +16,15 @@ services:
 
   server:
     build:
-      context: ./server
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: server/Dockerfile
     ports:
-      - "4000:4000"
+      - "127.0.0.1:42780:42780"
     environment:
       NODE_ENV: production
-      PORT: 4000
+      HOST: 0.0.0.0
+      PORT: 42780
+      SERVE_STATIC: "true"
       MYSQL_HOST: db
       MYSQL_PORT: "3306"
       MYSQL_USER: root
@@ -35,34 +33,42 @@ services:
       DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD}@db:3306/${MYSQL_DATABASE:-hr}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET must be set (>=32 chars)}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET must be set (>=32 chars)}
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
-      TRUST_PROXY: ${TRUST_PROXY:-loopback}
-      SMTP_HOST: ${SMTP_HOST}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_SECURE: ${SMTP_SECURE:-false}
-      SMTP_USER: ${SMTP_USER}
-      SMTP_PASS: ${SMTP_PASS}
-      SMTP_FROM: ${SMTP_FROM}
-      APP_URL: ${APP_URL:-http://localhost:3000}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:42780}
+      APP_URL: ${APP_URL:-http://localhost:42780}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-strict}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Kolkata}
+      ENABLE_API_DOCS: ${ENABLE_API_DOCS:-false}
+      UPLOAD_DIR: /app/uploads
+      BACKUP_DIR: /app/backup
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?ADMIN_EMAIL must be set}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD must be set (>=12 chars)}
     depends_on:
       db:
         condition: service_healthy
     restart: unless-stopped
+    volumes:
+      - uploads:/app/uploads
+      - backup:/app/backup
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4000/health"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:42780/ready || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 15s
 
+  # Optional: standalone Vite preview for local dev. Not used when server serves web/dist.
+  # Enable with: docker compose --profile dev up
   web:
+    profiles: ["dev"]
     build:
       context: ./web
       dockerfile: Dockerfile
       args:
-        API_URL: http://server:4000
+        VITE_API_URL: ""
     ports:
-      - "3000:3000"
+      - "42781:42780"
     environment:
       NODE_ENV: production
     depends_on:
@@ -72,3 +78,5 @@ services:
 
 volumes:
   mysql-data:
+  uploads:
+  backup:

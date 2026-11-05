@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { config } from './config';
+import { config } from './config.js';
 
 export interface StorageProvider {
   upload(key: string, buffer: Buffer, mimeType: string): Promise<{ url: string; size: number }>;
@@ -64,8 +64,8 @@ class S3Storage implements StorageProvider {
   constructor() {
     this.bucket = process.env.S3_BUCKET || '';
     this.region = process.env.S3_REGION || 'us-east-1';
-    this.accessKeyId = process.env.S3_ACCESS_KEY || '';
-    this.secretAccessKey = process.env.S3_SECRET_KEY || '';
+    this.accessKeyId = process.env.S3_ACCESS_KEY_ID || process.env.S3_ACCESS_KEY || '';
+    this.secretAccessKey = process.env.S3_SECRET_ACCESS_KEY || process.env.S3_SECRET_KEY || '';
     this.endpoint = process.env.S3_ENDPOINT || undefined;
   }
 

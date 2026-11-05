@@ -1,5 +1,5 @@
-import db, { uuid, getSetting, setSetting } from '../db';
-import { getISTDate, parseUTC, isSundayIST } from './time';
+import db, { uuid, getSetting, setSetting } from '../db/index.js';
+import { getISTDate, parseUTC, isSundayIST } from './time.js';
 
 const LEAVE_BALANCE = { casual: 8, sick: 8, proposal: 16 };
 

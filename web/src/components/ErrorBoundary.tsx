@@ -1,7 +1,6 @@
-'use client';
-
 import React from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { isProduction } from '../lib/env';
 
 interface ErrorInfo {
   componentStack: string;
@@ -32,7 +31,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     this.setState({ errorInfo: errorInfo as unknown as ErrorInfo });
 
-    if (process.env.NODE_ENV === 'development') {
+    if (!isProduction()) {
       console.error('[ErrorBoundary]', error, errorInfo);
     }
   }
@@ -58,7 +57,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
               An unexpected error occurred. The error has been logged for investigation.
             </p>
 
-            {process.env.NODE_ENV === 'development' && this.state.error && (
+            {!isProduction() && this.state.error && (
               <details className="mb-6 text-left">
                 <summary className="cursor-pointer text-sm text-slate-500 hover:text-slate-300 transition mb-2">
                   Error Details (Development)

@@ -17,13 +17,18 @@ import {
 } from 'docx';
 import {
   SWAIN_SIGNATURE_B64,
-  SWAIN_SIGNATURE_RAW_B64,
   SWAIN_BLUE_SIG_B64,
-  SWAIN_BLUE_SIG_RAW_B64,
 } from './appointmentAssets';
-import { POWERTECH_LOGO_B64, POWERTECH_LOGO_RAW_B64, POWERTECH_LOGO_ASPECT } from './powertechAssets';
+import { POWERTECH_LOGO_B64, POWERTECH_LOGO_ASPECT } from './powertechAssets';
+const b64Raw = (s: string) => s.includes(',') ? s.slice(s.indexOf(',')+1) : s;
 import { COMPANY_CONFIG, COLORS } from './companyConfig';
 import { getDocumentConfig, type DocumentTypeConfig } from './documentTypeConfig';
+
+// Footer and page-break constants
+const FOOTER_MARGIN = 15; // mm from bottom edge
+const FOOTER_SAFE_ZONE = 14; // mm threshold for checkPageBreak
+const PAGE_BREAK_DEFAULT_NEEDED = 20; // mm - reduced from 60
+const SALARY_SECTION_NEEDED = 8; // mm for salary section titles
 
 export type DocumentDocType =
   | 'appointment_letter'
@@ -91,6 +96,29 @@ export const getPronoun = (gender?: unknown): { subject: string; possessive: str
   if (g === 'female') return { subject: 'She', possessive: 'her', object: 'her' };
   if (g === 'other') return { subject: 'They', possessive: 'their', object: 'them' };
   return { subject: 'He', possessive: 'his', object: 'him' };
+};
+
+// "S/o Mr. X" for sons, "D/o Mr. X" for daughters. The parent's own
+// salutation is kept when present, otherwise defaults to Mr. (father).
+// Never derives the parent's salutation from the employee's gender.
+export const formatParentRelation = (gender?: unknown, parentName?: unknown): string => {
+  const raw = String(parentName || '').trim();
+  if (!raw) return '';
+  const g = String(gender || '').toLowerCase();
+  const relation = g === 'female' ? 'D/o' : 'S/o';
+  const hasPrefix = raw.startsWith('Mr.') || raw.startsWith('Ms.') || raw.startsWith('Mrs.') || raw.startsWith('Mx.');
+  return `, ${relation} ${hasPrefix ? raw : `Mr. ${raw}`}`;
+};
+
+// "One month" / "Two months" from internship date range (defaults to One month).
+export const formatInternshipDuration = (from?: unknown, to?: unknown): string => {
+  const fromD = new Date(String(from || ''));
+  const toD = new Date(String(to || ''));
+  if (isNaN(fromD.getTime()) || isNaN(toD.getTime())) return 'One month';
+  const months = Math.max(1, (toD.getFullYear() - fromD.getFullYear()) * 12 + (toD.getMonth() - fromD.getMonth()) + 1);
+  if (months === 1) return 'One month';
+  const words = ['Zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve'];
+  return `${words[months] ?? String(months)} months`;
 };
 
 export const DEFAULT_APPOINTMENT_TERMS = (salary = 'Rs. 6000/-', hours = '8 hours per day') => [
@@ -416,22 +444,6 @@ function drawTitle(doc: jsPDF, title: string, issueDate: string, docNumber: stri
   return y + 10;
 }
 
-function drawParagraph(doc: jsPDF, text: string, y: number): number {
-  const w = doc.internal.pageSize.getWidth();
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10.5);
-  const lines = doc.splitTextToSize(text, w - 28) as string[];
-  for (const line of lines) {
-    if (y > doc.internal.pageSize.getHeight() - 45) {
-      doc.addPage();
-      y = 25;
-    }
-    doc.text(line, 14, y);
-    y += 5.5;
-  }
-  return y;
-}
-
 function drawSignature(doc: jsPDF, issuedBy?: string | null) {
   const pageHeight = doc.internal.pageSize.getHeight();
   const w = doc.internal.pageSize.getWidth();
@@ -522,11 +534,12 @@ function drawSwainHeader(
 }
 
 /** Page break guard: if y would exceed the safe footer zone, start a new page. */
-function checkPageBreak(doc: jsPDF, y: number, needed: number = 60, drawFooterFn?: (d: jsPDF) => void): number {
+function checkPageBreak(doc: jsPDF, y: number, needed: number = PAGE_BREAK_DEFAULT_NEEDED, drawFooterFn?: (d: jsPDF) => void, drawHeaderFn?: (d: jsPDF) => void): number {
   const pageH = doc.internal.pageSize.getHeight();
-  if (y + needed > pageH - 14) {
+  if (y + needed > pageH - FOOTER_SAFE_ZONE) {
     if (drawFooterFn) drawFooterFn(doc);
     doc.addPage();
+    if (drawHeaderFn) drawHeaderFn(doc);
     return 25;
   }
   return y;
@@ -535,21 +548,21 @@ function checkPageBreak(doc: jsPDF, y: number, needed: number = 60, drawFooterFn
 function drawSwainFooter(doc: jsPDF) {
   const w = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
-  const footerLineY = pageH - 13.4;
+  const footerLineY = pageH - FOOTER_MARGIN;
 
   doc.setDrawColor(0, 32, 96);
   doc.setLineWidth(0.6);
   doc.line(4, footerLineY, w - 4, footerLineY);
 
-  // Original layout: regd+phone on ONE line, website below — lifted 1.3mm for print safe zone
+  // Original layout: regd+phone on ONE line, website below — lifted for print safe zone
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(0, 32, 96);
-  doc.text(`Regd. Office: ${COMPANY_CONFIG.registeredOffice.address.replace('Regd. Office: ', '')}, Phone- ${COMPANY_CONFIG.registeredOffice.phone}`, w / 2, footerLineY + 2.5, { align: 'center' });
+  doc.text(`Regd. Office: ${COMPANY_CONFIG.registeredOffice.address.replace('Regd. Office: ', '')}, Phone- ${COMPANY_CONFIG.registeredOffice.phone}`, w / 2, footerLineY + 3, { align: 'center' });
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(192, 0, 0);
-  doc.text(SWAIN_COMPANY.webPortal, w / 2, footerLineY + 6.5, { align: 'center' });
+  doc.text(SWAIN_COMPANY.webPortal, w / 2, footerLineY + 7, { align: 'center' });
   doc.setTextColor(0, 0, 0);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
@@ -1022,9 +1035,7 @@ function buildExperienceCertificate(doc: jsPDF, input: DocumentPdfInput) {
 
   const rawName = String(f.employeeName || 'Employee').trim();
   const salutedName = rawName.startsWith('Mr.') || rawName.startsWith('Ms.') || rawName.startsWith('Mrs.') || rawName.startsWith('Mx.') ? rawName : `${getSalutation(f.gender)} ${rawName}`;
-  const fatherStr = f.fatherName
-    ? `, S/o ${String(f.fatherName).startsWith('Mr.') || String(f.fatherName).startsWith('Ms.') || String(f.fatherName).startsWith('Mx.') ? f.fatherName : `${getSalutation(f.gender)} ${f.fatherName}`}`
-    : '';
+  const fatherStr = formatParentRelation(f.gender, f.fatherName);
   const addrStr = f.permanentAddress
     ? ` residing at ${String(f.permanentAddress).replace(/\n+/g, ', ')}`
     : '';
@@ -1169,16 +1180,18 @@ function buildInternshipCertificate(doc: jsPDF, input: DocumentPdfInput) {
   doc.setFontSize(9.5);
   
   // Build detailed internship certificate text matching actual format
-  const internName = f.internName || '-';
+  const rawInternName = String(f.internName || '-').trim();
+  const internName = rawInternName.startsWith('Mr.') || rawInternName.startsWith('Ms.') || rawInternName.startsWith('Mrs.') || rawInternName.startsWith('Mx.') ? rawInternName : `${getSalutation(f.gender)} ${rawInternName}`;
   const institution = f.institution || '-';
   const regNumber = f.registrationNumber ? ` bearing Registration No - ${f.registrationNumber}` : '';
-  const fatherName = f.fatherName ? `, S/o ${f.fatherName}` : '';
-  const domain = f.domain || '-';
+  const fatherName = formatParentRelation(f.gender, f.fatherName);
+  const domain = f.domain ? ` in the domain of ${String(f.domain).trim()}` : '';
   
   // Use DD.MM.YYYY format for internship dates
   const internshipPeriod = fmtDateRangeDDMMYYYY(f.internshipFrom, f.internshipTo);
+  const durationText = formatInternshipDuration(f.internshipFrom, f.internshipTo);
   
-  const introText = `This is to certify that ${getSalutation(f.gender)} ${internName}, a student of ${institution}${regNumber}${fatherName} has served as a full-time intern in our Company Power Tech Consultants, for a period of One month i.e. from ${internshipPeriod}.`;
+  const introText = `This is to certify that ${internName}, a student of ${institution}${regNumber}${fatherName} has served as a full-time intern${domain} in our Company Power Tech Consultants, for a period of ${durationText} i.e. from ${internshipPeriod}.`;
   
   const introLines = doc.splitTextToSize(introText, contentW) as string[];
   for (const line of introLines) {
@@ -1194,7 +1207,7 @@ function buildInternshipCertificate(doc: jsPDF, input: DocumentPdfInput) {
   // Performance evaluation text
   const perfText = f.completionRemark && String(f.completionRemark).trim()
     ? String(f.completionRemark)
-    : `${getPronoun(f.gender).possessive} contribution is quite valuable for the company. ${getPronoun(f.gender).possessive} interpersonal skills are outstanding and ${getPronoun(f.gender).subject.toLowerCase()} has been very helpful to the company. ${getPronoun(f.gender).subject} is sincere, hardworking and ${getPronoun(f.gender).possessive} conduct is good.`;
+    : `${getPronoun(f.gender).possessive} contribution is quite valuable for the company. ${getPronoun(f.gender).possessive} interpersonal skills are outstanding and ${getPronoun(f.gender).subject} has been very helpful to the company. ${getPronoun(f.gender).subject} is sincere, hardworking and ${getPronoun(f.gender).possessive} conduct is good.`;
   
   const perfLines = doc.splitTextToSize(perfText, contentW) as string[];
   for (const line of perfLines) {
@@ -1299,7 +1312,7 @@ function buildSalarySlip(doc: jsPDF, input: DocumentPdfInput) {
   );
 
   const sectionTitle = (text: string) => {
-    y = checkPageBreak(doc, y, 12, drawSwainFooter);
+    y = checkPageBreak(doc, y, SALARY_SECTION_NEEDED, drawSwainFooter);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.setTextColor(0, 32, 96);
@@ -1311,9 +1324,15 @@ function buildSalarySlip(doc: jsPDF, input: DocumentPdfInput) {
   const boldRow = (cells: (string | number)[]) => cells.map((c) => ({ content: String(c), styles: { fontStyle: 'bold' as const } }));
   const tableOpts = {
     theme: 'grid' as const,
-    styles: { fontSize: 8.2, cellPadding: 1.3, lineColor: [183, 180, 204] as [number, number, number], lineWidth: 0.1, textColor: [30, 30, 30] as [number, number, number] },
-    headStyles: { fillColor: [233, 228, 245] as [number, number, number], textColor: [30, 30, 60] as [number, number, number], fontStyle: 'bold' as const, fontSize: 8.5 },
+    styles: { fontSize: 7.5, cellPadding: 1.0, lineColor: [183, 180, 204] as [number, number, number], lineWidth: 0.1, textColor: [30, 30, 30] as [number, number, number] },
+    headStyles: { fillColor: [233, 228, 245] as [number, number, number], textColor: [30, 30, 60] as [number, number, number], fontStyle: 'bold' as const, fontSize: 8 },
     margin: { left: 14, right: 14 },
+    didDrawPage: (data: { pageNumber: number }) => {
+      if (data.pageNumber > 1) {
+        drawSwainHeader(doc, docConfig, { accreditation: false });
+        drawSwainFooter(doc);
+      }
+    },
   };
 
   sectionTitle('EARNINGS');
@@ -1384,7 +1403,7 @@ function buildSalarySlip(doc: jsPDF, input: DocumentPdfInput) {
   const restLines = restValue ? (doc.splitTextToSize(restValue, w - 28) as string[]) : [];
   const allValueLines = [...firstValueLines, ...restLines];
   for (let i = 0; i < allValueLines.length; i++) {
-    yEnd = checkPageBreak(doc, yEnd, 10, drawSwainFooter);
+    yEnd = checkPageBreak(doc, yEnd, 8, drawSwainFooter);
     if (i === 0) {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
@@ -1399,30 +1418,23 @@ function buildSalarySlip(doc: jsPDF, input: DocumentPdfInput) {
     yEnd += 4.5;
   }
   if (allValueLines.length === 0) {
-    yEnd = checkPageBreak(doc, yEnd, 10, drawSwainFooter);
+    yEnd = checkPageBreak(doc, yEnd, 8, drawSwainFooter);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.text(amountLabel, 14, yEnd);
     yEnd += 4.5;
   }
 
-  let noteY = yEnd + 8;
-  if (noteY > doc.internal.pageSize.getHeight() - 18) {
-    doc.addPage();
-    noteY = 25;
-  }
+  // Combined note + footer area - single check
+  yEnd = checkPageBreak(doc, yEnd, 20, drawSwainFooter);
   doc.setFont('helvetica', 'italic');
   doc.setFontSize(7.5);
   doc.setTextColor(120, 120, 120);
-  doc.text('This is a computer-generated salary slip, so a signature is not required', w / 2, noteY, { align: 'center' });
+  doc.text('This is a computer-generated salary slip, so a signature is not required', w / 2, yEnd, { align: 'center' });
   doc.setDrawColor(120, 120, 120);
   doc.setLineWidth(0.3);
-  doc.line(14, noteY + 3, w - 14, noteY + 3);
+  doc.line(14, yEnd + 3, w - 14, yEnd + 3);
   doc.setTextColor(0, 0, 0);
-  // Ensure footer not overprinted
-  if (noteY + 6 > doc.internal.pageSize.getHeight() - 14) {
-    doc.addPage();
-  }
 
   drawSwainFooter(doc);
 }
@@ -1474,6 +1486,12 @@ export function downloadDocumentPdf(input: DocumentPdfInput) {
 
 export function documentPdfPreviewUrl(input: DocumentPdfInput): string {
   return generateDocumentPdf(input).output('datauristring');
+}
+
+export function documentPdfPreviewBlobUrl(input: DocumentPdfInput): string {
+  const doc = generateDocumentPdf(input);
+  const blob = doc.output('blob');
+  return URL.createObjectURL(blob);
 }
 
 // ---------- DOCX (Word) rendering helpers ----------
@@ -1617,7 +1635,7 @@ function docxSignature(issuedBy?: string | null): Paragraph[] {
 }
 
 function docxSwainHeaderTable(docConfig: DocumentTypeConfig, opts: { accreditation?: boolean; expPhone?: boolean; expEmail?: boolean } = {}): Table {
-  const logoBytes = Uint8Array.from(atob(POWERTECH_LOGO_RAW_B64), (c) => c.charCodeAt(0));
+  const logoBytes = Uint8Array.from(atob(b64Raw(POWERTECH_LOGO_B64)), (c) => c.charCodeAt(0));
   const NO_BORDERS = {
     top: { style: BorderStyle.NONE, size: 0, color: 'auto' },
     bottom: { style: BorderStyle.NONE, size: 0, color: 'auto' },
@@ -1677,7 +1695,7 @@ function docxSwainFooter(): Paragraph[] {
 // Custom Swain & Sons Word Renderers
 function docxAppointmentLetter(f: Record<string, unknown>, docNumber: string, issueDate: string): (Paragraph | Table)[] {
   const docConfig = getDocxDocumentConfig('appointment_letter');
-  const sigBytes = Uint8Array.from(atob(SWAIN_SIGNATURE_RAW_B64), (c) => c.charCodeAt(0));
+  const sigBytes = Uint8Array.from(atob(b64Raw(SWAIN_SIGNATURE_B64)), (c) => c.charCodeAt(0));
   
   // Get appropriate manager title based on document type
   const managerTitle = docConfig.managerTitle === 'manager' 
@@ -1818,7 +1836,7 @@ function docxAppointmentLetter(f: Record<string, unknown>, docNumber: string, is
 
 function docxLeavingCertificate(f: Record<string, unknown>, docNumber: string, issueDate: string): (Paragraph | Table)[] {
   const docConfig = getDocxDocumentConfig('leaving_certificate');
-  const blueSigBytes = Uint8Array.from(atob(SWAIN_BLUE_SIG_RAW_B64), (c) => c.charCodeAt(0));
+  const blueSigBytes = Uint8Array.from(atob(b64Raw(SWAIN_BLUE_SIG_B64)), (c) => c.charCodeAt(0));
   
   // Get appropriate manager title based on document type
   const managerTitle = docConfig.managerTitle === 'manager' 
@@ -1919,7 +1937,7 @@ function docxLeavingCertificate(f: Record<string, unknown>, docNumber: string, i
 
 function docxExperienceCertificate(f: Record<string, unknown>, docNumber: string, issueDate: string): (Paragraph | Table)[] {
   const docConfig = getDocxDocumentConfig('experience_certificate');
-  const blueSigBytes = Uint8Array.from(atob(SWAIN_BLUE_SIG_RAW_B64), (c) => c.charCodeAt(0));
+  const blueSigBytes = Uint8Array.from(atob(b64Raw(SWAIN_BLUE_SIG_B64)), (c) => c.charCodeAt(0));
   
   // Get appropriate manager title based on document type
   const managerTitle = docConfig.managerTitle === 'manager' 
@@ -1937,9 +1955,7 @@ function docxExperienceCertificate(f: Record<string, unknown>, docNumber: string
 
   const rawName = String(f.employeeName || 'Employee').trim();
   const salutedName = rawName.startsWith('Mr.') || rawName.startsWith('Ms.') || rawName.startsWith('Mrs.') || rawName.startsWith('Mx.') ? rawName : `${getSalutation(f.gender)} ${rawName}`;
-  const fatherStr = f.fatherName
-    ? `, S/o ${String(f.fatherName).startsWith('Mr.') || String(f.fatherName).startsWith('Ms.') || String(f.fatherName).startsWith('Mx.') ? f.fatherName : `${getSalutation(f.gender)} ${f.fatherName}`}`
-    : '';
+  const fatherStr = formatParentRelation(f.gender, f.fatherName);
   const addrStr = f.permanentAddress
     ? ` residing at ${String(f.permanentAddress).replace(/\n+/g, ', ')}`
     : '';
@@ -1986,7 +2002,7 @@ function docxExperienceCertificate(f: Record<string, unknown>, docNumber: string
 
 function docxInternshipCertificate(f: Record<string, unknown>, docNumber: string, issueDate: string): (Paragraph | Table)[] {
   const docConfig = getDocxDocumentConfig('internship_certificate');
-  const sigBytes = Uint8Array.from(atob(SWAIN_SIGNATURE_RAW_B64), (c) => c.charCodeAt(0));
+  const sigBytes = Uint8Array.from(atob(b64Raw(SWAIN_SIGNATURE_B64)), (c) => c.charCodeAt(0));
   
   // Get appropriate manager title based on document type
   const managerTitle = docConfig.managerTitle === 'manager' 
@@ -2029,18 +2045,19 @@ function docxInternshipCertificate(f: Record<string, unknown>, docNumber: string
   });
 
   // Build detailed internship certificate text matching actual format
-  const internName = f.internName || '-';
+  const rawInternName = String(f.internName || '-').trim();
+  const docxInternName = rawInternName.startsWith('Mr.') || rawInternName.startsWith('Ms.') || rawInternName.startsWith('Mrs.') || rawInternName.startsWith('Mx.') ? rawInternName : `${getSalutation(f.gender)} ${rawInternName}`;
   const institution = f.institution || '-';
   const regNumber = f.registrationNumber ? ` bearing Registration No - ${f.registrationNumber}` : '';
-  const fatherName = f.fatherName ? `, S/o ${f.fatherName}` : '';
-  const domain = f.domain || '-';
+  const fatherName = formatParentRelation(f.gender, f.fatherName);
+  const domain = f.domain ? ` in the domain of ${String(f.domain).trim()}` : '';
   const internshipPeriod = fmtDateRangeDDMMYYYY(f.internshipFrom, f.internshipTo);
 
-  const introText = `This is to certify that ${getSalutation(f.gender)} ${internName}, a student of ${institution}${regNumber}${fatherName} has served as a full-time intern in our Company Power Tech Consultants, for a period of One month i.e. from ${internshipPeriod}.`;
+  const introText = `This is to certify that ${docxInternName}, a student of ${institution}${regNumber}${fatherName} has served as a full-time intern${domain} in our Company Power Tech Consultants, for a period of ${formatInternshipDuration(f.internshipFrom, f.internshipTo)} i.e. from ${internshipPeriod}.`;
 
   const perfText = f.completionRemark && String(f.completionRemark).trim()
     ? String(f.completionRemark)
-    : `${getPronoun(f.gender).possessive} contribution is quite valuable for the company. ${getPronoun(f.gender).possessive} interpersonal skills are outstanding and ${getPronoun(f.gender).subject.toLowerCase()} has been very helpful to the company. ${getPronoun(f.gender).subject} is sincere, hardworking and ${getPronoun(f.gender).possessive} conduct is good.`;
+    : `${getPronoun(f.gender).possessive} contribution is quite valuable for the company. ${getPronoun(f.gender).possessive} interpersonal skills are outstanding and ${getPronoun(f.gender).subject} has been very helpful to the company. ${getPronoun(f.gender).subject} is sincere, hardworking and ${getPronoun(f.gender).possessive} conduct is good.`;
 
   const elements: Paragraph[] = [
     docxP('TO WHOMEVER IT MAY CONCERN', { bold: true, size: 11, align: AlignmentType.CENTER, spacingAfter: 140 }),

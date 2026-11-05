@@ -1,7 +1,7 @@
-import db, { uuid } from '../../db';
-import { getIO } from '../../lib/socket';
-import { cache } from '../../lib/cache';
-import { AppError } from '../../lib/app-error';
+import db, { uuid } from '../../db/index.js';
+import { getIO } from '../../lib/socket.js';
+import { cache } from '../../lib/cache.js';
+import { AppError } from '../../lib/app-error.js';
 
 const PROTECTED_STATUSES = "('present','work_end','on_break','half_day','leave','remote')";
 
@@ -54,13 +54,13 @@ export class HolidaysService {
       const CHUNK = 500;
       for (let i = 0; i < affectedUsers.length; i += CHUNK) {
         const chunk = affectedUsers.slice(i, i + CHUNK);
-        const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, datetime(\'now\'), datetime(\'now\'))').join(', ');
+        const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, NOW(), NOW())').join(', ');
         const params: any[] = [];
         for (const uid of chunk) { params.push(uuid(), uid, input.date, 'holiday', input.name); }
         params.push(input.name);
         await db.prepare(`INSERT INTO attendance (id, user_id, date, status, notes, created_at, updated_at)
-          VALUES ${placeholders}
-          ON CONFLICT(user_id, date) DO UPDATE SET status = CASE WHEN attendance.status IN ${PROTECTED_STATUSES} THEN attendance.status ELSE 'holiday' END, notes = CASE WHEN attendance.status IN ${PROTECTED_STATUSES} THEN attendance.notes ELSE ? END, updated_at = datetime('now')`).run(...params);
+           VALUES ${placeholders}
+          ON DUPLICATE KEY UPDATE status = CASE WHEN attendance.status IN ${PROTECTED_STATUSES} THEN attendance.status ELSE 'holiday' END, notes = CASE WHEN attendance.status IN ${PROTECTED_STATUSES} THEN attendance.notes ELSE ? END, updated_at = NOW()`).run(...params);
       }
 
       return await this.getById(id);
@@ -148,14 +148,14 @@ export class HolidaysService {
         for (const uid of targetUserIds) {
           const leaveId = leaveMap.get(uid);
           if (leaveId) {
-            await db.prepare("UPDATE attendance SET status = 'leave', notes = ?, updated_at = datetime('now') WHERE date = ? AND status = 'holiday' AND user_id = ?").run(`Approved leave (${leaveId})`, h.date, uid);
+            await db.prepare("UPDATE attendance SET status = 'leave', notes = ?, updated_at = NOW() WHERE date = ? AND status = 'holiday' AND user_id = ?").run(`Approved leave (${leaveId})`, h.date, uid);
           } else {
             // Restore to 'present' if they had checked in, otherwise 'absent'
             const hadCheckedIn = await db.prepare("SELECT 1 FROM attendance WHERE user_id = ? AND date = ? AND login_time IS NOT NULL AND status = 'holiday'").get(uid, h.date);
             if (hadCheckedIn) {
-              await db.prepare("UPDATE attendance SET status = 'present', notes = NULL, updated_at = datetime('now') WHERE date = ? AND status = 'holiday' AND user_id = ?").run(h.date, uid);
+              await db.prepare("UPDATE attendance SET status = 'present', notes = NULL, updated_at = NOW() WHERE date = ? AND status = 'holiday' AND user_id = ?").run(h.date, uid);
             } else {
-              await db.prepare("UPDATE attendance SET status = 'absent', notes = NULL, updated_at = datetime('now') WHERE date = ? AND status = 'holiday' AND user_id = ?").run(h.date, uid);
+              await db.prepare("UPDATE attendance SET status = 'absent', notes = NULL, updated_at = NOW() WHERE date = ? AND status = 'holiday' AND user_id = ?").run(h.date, uid);
             }
           }
         }
@@ -165,9 +165,9 @@ export class HolidaysService {
         for (const u of allActive) {
           const hadCheckedIn = await db.prepare("SELECT 1 FROM attendance WHERE user_id = ? AND date = ? AND login_time IS NOT NULL AND status = 'holiday'").get(u.id, h.date);
           if (hadCheckedIn) {
-            await db.prepare("UPDATE attendance SET status = 'present', notes = NULL, updated_at = datetime('now') WHERE date = ? AND status = 'holiday' AND user_id = ?").run(h.date, u.id);
+            await db.prepare("UPDATE attendance SET status = 'present', notes = NULL, updated_at = NOW() WHERE date = ? AND status = 'holiday' AND user_id = ?").run(h.date, u.id);
           } else {
-            await db.prepare("UPDATE attendance SET status = 'absent', notes = NULL, updated_at = datetime('now') WHERE date = ? AND status = 'holiday' AND user_id = ?").run(h.date, u.id);
+            await db.prepare("UPDATE attendance SET status = 'absent', notes = NULL, updated_at = NOW() WHERE date = ? AND status = 'holiday' AND user_id = ?").run(h.date, u.id);
           }
         }
       }

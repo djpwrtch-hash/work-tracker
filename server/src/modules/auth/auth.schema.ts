@@ -12,7 +12,7 @@ export const loginSchema = z.object({
 
 export const registerSchema = z.object({
   email: z.string().trim().email('Invalid email format').toLowerCase(),
-  password: z.string().trim().min(8, 'Password must be at least 8 characters').max(128, 'Password too long').regex(/[A-Z]/, 'Password must contain at least one uppercase letter').regex(/[a-z]/, 'Password must contain at least one lowercase letter').regex(/[0-9]/, 'Password must contain at least one number'),
+  password: z.string().trim().min(12, 'Password must be at least 12 characters').max(128, 'Password too long').regex(/[A-Z]/, 'Password must contain at least one uppercase letter').regex(/[a-z]/, 'Password must contain at least one lowercase letter').regex(/[0-9]/, 'Password must contain at least one number').regex(/[^A-Za-z0-9]/, 'Password must contain at least one special character'),
   firstName: z.string().trim().min(1, 'First name is required').max(100, 'First name too long').regex(/^[a-zA-Z\s'-]+$/, 'First name contains invalid characters'),
   lastName: z.string().trim().min(1, 'Last name is required').max(100, 'Last name too long').regex(/^[a-zA-Z\s'-]+$/, 'Last name contains invalid characters'),
   phoneNumber: z.string().trim().regex(/^\+?[1-9]\d{1,14}$/, 'Invalid phone number format').optional().or(z.literal('')),
@@ -23,7 +23,7 @@ export const registerSchema = z.object({
 
 export const changePasswordSchema = z.object({
   currentPassword: z.string().trim().min(1, 'Current password is required'),
-  newPassword: z.string().trim().min(8, 'Password must be at least 8 characters').max(128, 'Password too long').regex(/[A-Z]/, 'Password must contain at least one uppercase letter').regex(/[a-z]/, 'Password must contain at least one lowercase letter').regex(/[0-9]/, 'Password must contain at least one number'),
+  newPassword: z.string().trim().min(12, 'Password must be at least 12 characters').max(128, 'Password too long').regex(/[A-Z]/, 'Password must contain at least one uppercase letter').regex(/[a-z]/, 'Password must contain at least one lowercase letter').regex(/[0-9]/, 'Password must contain at least one number').regex(/[^A-Za-z0-9]/, 'Password must contain at least one special character'),
 }).refine((data) => data.currentPassword !== data.newPassword, {
   message: 'New password must be different from current password',
   path: ['newPassword'],
@@ -43,7 +43,7 @@ export const logoutSchema = z.object({
 
 export const resetPasswordSchema = z.object({
   token: z.string().trim().min(1, 'Token is required'),
-  newPassword: z.string().trim().min(8, 'Password must be at least 8 characters').max(128, 'Password too long').regex(/[A-Z]/, 'Password must contain at least one uppercase letter').regex(/[a-z]/, 'Password must contain at least one lowercase letter').regex(/[0-9]/, 'Password must contain at least one number'),
+  newPassword: z.string().trim().min(12, 'Password must be at least 12 characters').max(128, 'Password too long').regex(/[A-Z]/, 'Password must contain at least one uppercase letter').regex(/[a-z]/, 'Password must contain at least one lowercase letter').regex(/[0-9]/, 'Password must contain at least one number').regex(/[^A-Za-z0-9]/, 'Password must contain at least one special character'),
 });
 
 export const twoFactorVerifySchema = z.object({

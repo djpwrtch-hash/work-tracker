@@ -1,17 +1,17 @@
 import { Router, Request, Response } from 'express';
-import db from '../../db';
-import { authenticate } from '../../middleware/authenticate';
-import { requireRole } from '../../middleware/rbac';
-import { getPasswordPolicy, updatePasswordPolicy } from '../../lib/password-policy';
+import db from '../../db/index.js';
+import { authenticate } from '../../middleware/authenticate.js';
+import { requireRole } from '../../middleware/rbac.js';
+import { getPasswordPolicy, updatePasswordPolicy } from '../../lib/password-policy.js';
 import { z } from 'zod';
-import { validate } from '../../middleware/validate';
+import { validate } from '../../middleware/validate.js';
 
 const router = Router();
 
 router.use(authenticate);
 
 const updatePolicySchema = z.object({
-  minLength: z.number().int().min(6).max(128).optional(),
+  minLength: z.number().int().min(12).max(128).optional(),
   requireUppercase: z.boolean().optional(),
   requireLowercase: z.boolean().optional(),
   requireNumber: z.boolean().optional(),

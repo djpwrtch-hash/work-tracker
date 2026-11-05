@@ -1,10 +1,10 @@
 import { Router, Request, Response } from 'express';
 import path from 'path';
-import db from '../../db';
-import { authenticate } from '../../middleware/authenticate';
-import { requireRole } from '../../middleware/rbac';
-import { createBackup, listBackups } from '../../lib/backup';
-import securityRoutes from '../security/security.routes';
+import db from '../../db/index.js';
+import { authenticate } from '../../middleware/authenticate.js';
+import { requireRole } from '../../middleware/rbac.js';
+import { createBackup, listBackups } from '../../lib/backup.js';
+import securityRoutes from '../security/security.routes.js';
 
 const router = Router();
 

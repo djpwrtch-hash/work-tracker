@@ -58,4 +58,4 @@ console.log('  Android: Settings -> Security -> More security settings -> Encryp
 console.log('           Install a certificate -> CA certificate -> select cert.pem, then restart Chrome.');
 console.log('  iOS:     Open cert.pem in Safari -> install profile -> Settings -> Profile Downloaded -> Install ->');
 console.log('           Settings -> General -> About -> Certificate Trust Settings -> enable full trust for the cert.');
-console.log('  Then browse to https://<pc-lan-ip>:3000 and check in.');
+console.log('  Then browse to https://<pc-lan-ip>:42780 and check in.');

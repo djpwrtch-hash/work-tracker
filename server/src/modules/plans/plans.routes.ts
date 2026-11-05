@@ -1,10 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { validate, requireUuid } from '../../middleware/validate';
-import { authenticate } from '../../middleware/authenticate';
-import { requireRole } from '../../middleware/rbac';
-import { apiCache } from '../../middleware/api-cache';
-import { createPlanSchema, updatePlanSchema, listPlansSchema, reviewPlanSchema } from './plans.schema';
-import { PlansService } from './plans.service';
+import { validate, requireUuid } from '../../middleware/validate.js';
+import { authenticate } from '../../middleware/authenticate.js';
+import { requireRole } from '../../middleware/rbac.js';
+import { apiCache } from '../../middleware/api-cache.js';
+import { createPlanSchema, updatePlanSchema, listPlansSchema, reviewPlanSchema } from './plans.schema.js';
+import { PlansService } from './plans.service.js';
 
 const router = Router();
 

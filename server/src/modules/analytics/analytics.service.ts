@@ -1,5 +1,5 @@
-import db from '../../db';
-import { getISTDate, getISTNow } from '../../lib/time';
+import db from '../../db/index.js';
+import { getISTDate, getISTNow } from '../../lib/time.js';
 
 export class AnalyticsService {
   static async attendanceTrends(year: number, month: number) {
@@ -97,15 +97,15 @@ export class AnalyticsService {
     for (const t of types) totalByType[t] = 0;
 
     // Fetch company-wide holidays (no assignees) for the year to exclude them from leave counting
-    const holidays = (await db.prepare(`
+    const holidays = new Set((await db.prepare(`
       SELECT h.date FROM holidays h
       LEFT JOIN holiday_assignees ha ON ha.holiday_id = h.id
       WHERE h.date >= ? AND h.date <= ?
       GROUP BY h.id HAVING COUNT(ha.user_id) = 0
-    `).all(start, end) as any[]).map((h: any) => h.date);
+    `).all(start, end) as any[]).map((h: any) => h.date));
+    const parseDate = (s: string) => new Date(`${s}T00:00:00.000Z`);
 
     for (const l of leaves) {
-      const parseDate = (s: string) => new Date(`${s}T00:00:00.000Z`);
       const clipStart = parseDate(l.start_date) < parseDate(start) ? parseDate(start) : parseDate(l.start_date);
       const clipEnd = parseDate(l.end_date) > parseDate(end) ? parseDate(end) : parseDate(l.end_date);
 
@@ -113,7 +113,7 @@ export class AnalyticsService {
       while (cursor <= clipEnd) {
         const dayOfWeek = cursor.getUTCDay();
         const dateStr = cursor.toISOString().split('T')[0]!;
-        if (dayOfWeek !== 0 && !holidays.includes(dateStr)) {
+        if (dayOfWeek !== 0 && !holidays.has(dateStr)) {
           const monthKey = String(cursor.getUTCMonth() + 1).padStart(2, '0');
           const entry = monthlyMap.get(monthKey);
           if (entry) entry[l.type] = (entry[l.type] ?? 0) + 1;
@@ -146,7 +146,7 @@ export class AnalyticsService {
 
     const rows = await db.prepare(`
       SELECT u.department_id, d.name as dept_name,
-        strftime('%m', a.date) as month,
+        DATE_FORMAT(a.date, '%m') as month,
         COALESCE(SUM(a.overtime_hours), 0) as total_overtime,
         COUNT(DISTINCT a.user_id) as user_count
       FROM attendance a

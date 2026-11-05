@@ -1,10 +1,8 @@
-'use client';
-
 import { useEffect, useState } from 'react';
-import { usePathname } from 'next/navigation';
+import { useLocation } from 'react-router-dom';
 
 export default function RouteLoadingIndicator() {
-  const pathname = usePathname();
+  const { pathname } = useLocation();
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {

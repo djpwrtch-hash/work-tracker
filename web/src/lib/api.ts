@@ -1,39 +1,38 @@
 import axios from 'axios';
+import { getEnv } from './env';
+
+const apiOrigin = (getEnv('VITE_API_URL') ?? getEnv('NEXT_PUBLIC_API_URL'))?.replace(/\/+$/, '');
 
 export const api = axios.create({
-  baseURL: '/api/v1',
+  baseURL: apiOrigin ? `${apiOrigin}/api/v1` : '/api/v1',
   headers: { 'Content-Type': 'application/json' },
   withCredentials: true,
   timeout: 30000,
 });
 
-let _accessToken: string | null = null;
-let _refreshPromise: Promise<string> | null = null;
-const _tokenListeners = new Set<(token: string | null) => void>();
-const _retryQueue: Array<{ resolve: (token: string) => void; reject: (err: any) => void }> = [];
-
-export const setAccessToken = (t: string | null) => { _accessToken = t; _tokenListeners.forEach(fn => fn(t)); };
-export const getAccessToken = () => _accessToken;
-export const onTokenChange = (fn: (token: string | null) => void) => { _tokenListeners.add(fn); return () => { _tokenListeners.delete(fn); }; };
+export { setAccessToken, getAccessToken, onTokenChange } from './tokenStore';
+import { getAccessToken, setAccessToken, getRefreshPromise, setRefreshPromise } from './tokenStore';
 
 export async function doRefresh(): Promise<string> {
-  if (_refreshPromise) return _refreshPromise;
-  _refreshPromise = api
+  const existing = getRefreshPromise();
+  if (existing) return existing;
+  const promise = api
     .post<{ accessToken: string }>('/auth/refresh', {})
     .then((res) => {
       setAccessToken(res.data.accessToken);
       // Re-auth socket with fresh token to prevent "Invalid token" after refresh
       import('./socket').then((m) => m.initializeSocket(res.data.accessToken)).catch(() => {});
-      return _accessToken as string;
+      return getAccessToken() as string;
     })
     .catch((err) => {
       setAccessToken(null);
       throw err;
     })
     .finally(() => {
-      _refreshPromise = null;
+      setRefreshPromise(null);
     });
-  return _refreshPromise;
+  setRefreshPromise(promise);
+  return promise;
 }
 
 export function getApiError(error: unknown, fallback: string) {
@@ -48,7 +47,8 @@ export function getApiError(error: unknown, fallback: string) {
 }
 
 api.interceptors.request.use((config) => {
-  if (_accessToken && config.headers) config.headers.Authorization = `Bearer ${_accessToken}`;
+  const token = getAccessToken();
+  if (token && config.headers) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
@@ -65,13 +65,15 @@ api.interceptors.response.use(
       orig._retry = true;
       try {
         // If a refresh is already in progress, wait for it instead of triggering another
-        if (_refreshPromise) {
-          await _refreshPromise;
+        const pending = getRefreshPromise();
+        if (pending) {
+          await pending;
         } else {
           await doRefresh();
         }
-        if (!_accessToken) throw new Error('No token after refresh');
-        orig.headers.Authorization = `Bearer ${_accessToken}`;
+        const token = getAccessToken();
+        if (!token) throw new Error('No token after refresh');
+        orig.headers.Authorization = `Bearer ${token}`;
         return api(orig);
       } catch {
         if (typeof window !== 'undefined') {
@@ -90,22 +92,6 @@ export const analyticsApi = {
   departmentPerformance: () => api.get('/analytics/department-performance'),
   employeeProductivity: (params?: any) => api.get('/analytics/employee-productivity', { params }),
   managerDashboard: (managerId: string) => api.get('/analytics/manager-dashboard', { params: { managerId } }),
-};
-
-export const reportTemplatesApi = {
-  list: (params?: any) => api.get('/report-templates', { params }),
-  create: (data: any) => api.post('/report-templates', data),
-  update: (id: string, data: any) => api.patch(`/report-templates/${id}`, data),
-  delete: (id: string) => api.delete(`/report-templates/${id}`),
-};
-
-export const scheduledReportsApi = {
-  list: (params?: any) => api.get('/scheduled-reports', { params }),
-  create: (data: any) => api.post('/scheduled-reports', data),
-  update: (id: string, data: any) => api.patch(`/scheduled-reports/${id}`, data),
-  delete: (id: string) => api.delete(`/scheduled-reports/${id}`),
-  run: (id: string) => api.post(`/scheduled-reports/${id}/run`),
-  results: (id: string) => api.get(`/scheduled-reports/${id}/results`),
 };
 
 export const overtimeApi = {

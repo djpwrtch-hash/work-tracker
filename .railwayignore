@@ -1,0 +1,24 @@
+# Files excluded from `railway up` uploads. Docker builds additionally use .dockerignore.
+.git
+.github
+.gitignore
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+**/node_modules
+**/dist
+**/coverage
+**/test-results
+**/playwright-report
+**/*.log
+server/uploads
+server/backup
+uploads
+backup
+release
+*.bat
+# Desktop launcher is local-only; the cloud image serves the web app from web/dist.
+desktop
+server/desktop

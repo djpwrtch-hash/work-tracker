@@ -1,13 +1,13 @@
 import { Router, Request, Response } from 'express';
-import { validate, requireUuid } from '../../middleware/validate';
-import { authenticate } from '../../middleware/authenticate';
-import { requireRole } from '../../middleware/rbac';
-import { apiCache } from '../../middleware/api-cache';
+import { validate, requireUuid } from '../../middleware/validate.js';
+import { authenticate } from '../../middleware/authenticate.js';
+import { requireRole } from '../../middleware/rbac.js';
+import { apiCache } from '../../middleware/api-cache.js';
 import {
   createTaskSchema, updateTaskSchema, listTasksSchema,
   addCommentSchema, requestApprovalSchema, reviewApprovalSchema,
-} from './tasks.schema';
-import { TasksService } from './tasks.service';
+} from './tasks.schema.js';
+import { TasksService } from './tasks.service.js';
 
 const router = Router();
 

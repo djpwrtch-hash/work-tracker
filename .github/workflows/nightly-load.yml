@@ -1,0 +1,162 @@
+name: Nightly Load
+
+on:
+  schedule:
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-load
+  cancel-in-progress: true
+
+jobs:
+  load:
+    name: Artillery load tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: testroot
+          MYSQL_DATABASE: hr
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping -h localhost -u root -ptestroot" --health-interval=10s --health-timeout=5s --health-retries=10 --health-start-period=30s
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Wait for MySQL
+        run: |
+          for i in $(seq 1 60); do
+            if mysqladmin ping -h 127.0.0.1 -P 3306 -u root -ptestroot --silent 2>/dev/null; then
+              echo "MySQL is ready"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Setup test database
+        run: npm run setup
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: testroot
+          MYSQL_DATABASE: hr
+          JWT_ACCESS_SECRET: test-access-secret-32-chars-long-please
+          JWT_REFRESH_SECRET: test-refresh-secret-32-chars-long-please
+          ADMIN_EMAIL: test@example.com
+          ADMIN_PASSWORD: TestPassword123!
+
+      - name: Create hr_test database
+        run: mysql -h 127.0.0.1 -u root -ptestroot -e "CREATE DATABASE IF NOT EXISTS hr_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+
+      - name: Seed E2E director
+        run: |
+          MYSQL_DATABASE=hr_test DATABASE_URL= npx tsx src/test/e2e-seed.ts || MYSQL_DATABASE=hr_test npx tsx src/test/e2e-seed.ts
+        working-directory: server
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: testroot
+
+      - name: Start server in background
+        run: |
+          MYSQL_DATABASE=hr_test DATABASE_URL= nohup npx tsx src/server.ts > /tmp/server.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:42780/health >/dev/null 2>&1; then
+              echo "Server is up"
+              break
+            fi
+            sleep 2
+          done
+        working-directory: server
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: testroot
+          JWT_ACCESS_SECRET: test-access-secret-32-chars-long-please
+          JWT_REFRESH_SECRET: test-refresh-secret-32-chars-long-please
+
+      - name: Run artillery load tests
+        run: |
+          npx -y artillery@2.0.26 run server/load-tests/auth-load-test.yml
+          npx -y artillery@2.0.26 run server/load-tests/tasks-load-test.yml
+
+  e2e:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: testroot
+          MYSQL_DATABASE: hr
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping -h localhost -u root -ptestroot" --health-interval=10s --health-timeout=5s --health-retries=10 --health-start-period=30s
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+        working-directory: web
+
+      - name: Wait for MySQL
+        run: |
+          for i in $(seq 1 60); do
+            if mysqladmin ping -h 127.0.0.1 -P 3306 -u root -ptestroot --silent 2>/dev/null; then
+              echo "MySQL is ready"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Create hr_test and seed E2E director
+        run: |
+          mysql -h 127.0.0.1 -u root -ptestroot -e "CREATE DATABASE IF NOT EXISTS hr_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+          MYSQL_DATABASE=hr_test DATABASE_URL= npx tsx src/test/e2e-seed.ts
+        working-directory: server
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: testroot
+          JWT_ACCESS_SECRET: test-access-secret-32-chars-long-please
+          JWT_REFRESH_SECRET: test-refresh-secret-32-chars-long-please
+
+      - name: Run Playwright tests
+        run: npx playwright test
+        working-directory: web
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: testroot
+          JWT_ACCESS_SECRET: test-access-secret-32-chars-long-please
+          JWT_REFRESH_SECRET: test-refresh-secret-32-chars-long-please

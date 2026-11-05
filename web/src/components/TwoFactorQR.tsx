@@ -18,6 +18,5 @@ export default function TwoFactorQR({ uri, size = 200 }: { uri: string; size?: n
     return <div style={{ width: size, height: size }} className="rounded-xl bg-slate-700/40 animate-pulse flex items-center justify-center text-xs text-slate-400">Loading…</div>;
   }
 
-  // eslint-disable-next-line @next/next/no-img-element
   return <img src={src} width={size} height={size} alt="QR code for two-factor authentication" className="rounded-xl" />;
 }

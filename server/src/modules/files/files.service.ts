@@ -1,7 +1,7 @@
 import path from 'path';
-import db, { uuid } from '../../db';
-import { AppError } from '../../lib/app-error';
-import { getStorage } from '../../lib/storage';
+import db, { uuid } from '../../db/index.js';
+import { AppError } from '../../lib/app-error.js';
+import { getStorage } from '../../lib/storage.js';
 
 const MAX_FILE_SIZE_MB = Number(process.env.MAX_FILE_SIZE_MB || '10');
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -11,7 +11,6 @@ const ALLOWED_MIME_TYPES = new Set([
   'image/png',
   'image/gif',
   'image/webp',
-  'image/svg+xml',
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

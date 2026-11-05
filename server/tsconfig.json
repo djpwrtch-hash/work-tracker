@@ -4,7 +4,7 @@
     "module": "preserve",
     "moduleResolution": "Bundler",
     "outDir": "dist",
-    "rootDir": ".",
+    "rootDir": "./src",
 
     "strict": true,
     "esModuleInterop": true,
@@ -12,7 +12,10 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "noUncheckedIndexedAccess": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "@worktracker/shared": ["../shared/src"]
+    }
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist"]

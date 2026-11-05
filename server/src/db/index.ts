@@ -1,219 +1,38 @@
-import dotenv from 'dotenv';
-dotenv.config();
-import { randomUUID } from 'crypto';
 import path from 'path';
 import fs from 'fs';
-import mysql from 'mysql2/promise';
-import { AsyncLocalStorage } from 'async_hooks';
+import { db, uuid } from './pool.js';
+export * from './pool.js';
 
-const txnStore = new AsyncLocalStorage<mysql.PoolConnection>();
-
-const url = process.env.DATABASE_URL;
-let host = process.env.MYSQL_HOST || 'localhost';
-let port = Number(process.env.MYSQL_PORT || '3306');
-let user = process.env.MYSQL_USER || 'root';
-let password = process.env.MYSQL_PASSWORD || '';
-let database = process.env.MYSQL_DATABASE || 'hr';
-if (url) {
-  try {
-    const u = new URL(url);
-    host = u.hostname || host;
-    port = Number(u.port) || port;
-    user = decodeURIComponent(u.username) || user;
-    password = decodeURIComponent(u.password) || password;
-    database = u.pathname.replace(/^\//, '') || database;
-  } catch (e) { console.error('[DB] URL parse error:', e); }
-}
-if (process.env.NODE_ENV === 'production' && !password && !url) {
-  console.error('[DB] FATAL: MYSQL_PASSWORD (or DATABASE_URL) is required in production');
-  process.exit(1);
+// ---- Schema load ----
+function findSchema(): string | null {
+  const candidates = [
+    path.join(process.cwd(), 'src', 'db', 'schema.sql'),
+    path.join(process.cwd(), 'server', 'src', 'db', 'schema.sql'),
+    path.join(process.cwd(), 'dist', 'src', 'db', 'schema.sql'),
+    path.join(process.cwd(), 'dist', 'schema.sql'),
+    path.join(process.cwd(), 'release', 'src', 'db', 'schema.sql'),
+  ];
+  return candidates.find((c) => fs.existsSync(c)) ?? null;
 }
 
-const sslEnabled = String(process.env.MYSQL_SSL || '').toLowerCase() === 'true';
-const pool = mysql.createPool({
-  host, port, user, password, database,
-  waitForConnections: true, connectionLimit: 10, queueLimit: 50,
-  enableKeepAlive: true, timezone: '+00:00', connectTimeout: 10000, dateStrings: true,
-  charset: 'utf8mb4',
-  ...(sslEnabled ? { ssl: { rejectUnauthorized: true } } : {}),
-} as any);
-console.log(`[DB] MySQL pool: ${host}:${port}/${database} ssl=${sslEnabled} charset=utf8mb4`);
-
-// Retry with backoff for Hostinger transient DNS/cold-start (3 attempts)
-let _dbConnected = false;
-for (let attempt = 1; attempt <= 3; attempt++) {
+const schemaPath = findSchema();
+if (schemaPath) {
+  const schema = fs.readFileSync(schemaPath, 'utf-8');
   try {
-    const conn = await pool.getConnection();
-    try {
-      await conn.ping();
-      console.log('[DB] MySQL connected');
-      _dbConnected = true;
-    } finally {
-      conn.release();
-    }
-    break;
+    await db.exec(schema);
   } catch (e: any) {
-    console.error(`[DB] MySQL connection failed (attempt ${attempt}/3):`, e.message || e.code || e.errno || e.sqlMessage || String(e));
-    if (e.code) console.error('[DB] code:', e.code, 'errno:', e.errno, 'sqlState:', e.sqlState);
-    if (attempt === 3) {
-      console.error('[DB] All retries exhausted — exiting');
-      console.error('[DB] Env:', { host, port, user, database, sslEnabled });
-      process.exit(1);
-    }
-    await new Promise((r) => setTimeout(r, attempt * 2000));
+    console.error('[DB] Schema load failed:', e.message);
+    if (process.env.NODE_ENV === 'production') throw e;
   }
+} else {
+  const message = '[DB] schema.sql not found — base tables cannot be created';
+  console.warn(message);
+  if (process.env.NODE_ENV === 'production') throw new Error(message);
 }
-if (!_dbConnected) process.exit(1);
-
-function translateSql(sql: string): string {
-  return sql
-    .replace(/datetime\('now', '\+' \|\| \? \|\| ' minutes'\)/g, 'NOW() + INTERVAL ? MINUTE')
-    .replace(/datetime\('now', '\+' \|\| \? \|\| ' days'\)/g, 'NOW() + INTERVAL ? DAY')
-    .replace(/datetime\('now', '\+' \|\| \? \|\| ' seconds'\)/g, 'NOW() + INTERVAL ? SECOND')
-    .replace(/datetime\('now', '\+1 hour'\)/g, 'NOW() + INTERVAL 1 HOUR')
-    .replace(/datetime\('now'\)/g, 'NOW()')
-    .replace(/datetime\('now', '\+(\d+) seconds'\)/g, 'NOW() + INTERVAL $1 SECOND')
-    .replace(/date\('now', '-(\d+) days?'\)/g, 'DATE_SUB(CURDATE(), INTERVAL $1 DAY)')
-    .replace(/date\('now', '\+' \|\| (\d+) \|\| ' days'\)/g, 'DATE_ADD(CURDATE(), INTERVAL $1 DAY)')
-    .replace(/date\('now'\)/g, 'CURDATE()')
-    .replace(/strftime\('%Y',\s*([^)]+)\)/g, 'YEAR($1)')
-    .replace(/strftime\('%m',\s*([^)]+)\)/g, 'MONTH($1)')
-    .replace(/strftime\('%d',\s*([^)]+)\)/g, 'DAY($1)')
-    .replace(/strftime\('%H',\s*([^)]+)\)/g, 'HOUR($1)')
-    .replace(/strftime\('%M',\s*([^)]+)\)/g, 'MINUTE($1)')
-    .replace(/strftime\('%S',\s*([^)]+)\)/g, 'SECOND($1)')
-    .replace(/julianday\(([^)]+)\)/g, 'TO_DAYS($1)')
-    .replace(/substr\(/g, 'SUBSTRING(')
-    .replace(/AS INTEGER/gi, 'AS SIGNED')
-    .replace(/\bAUTOINCREMENT\b/gi, 'AUTO_INCREMENT');
-}
-
-function translateExec(sql: string): string {
-  let s = sql
-    .replace(/datetime\('now'\)/g, 'NOW()')
-    .replace(/datetime\('now', '\+(\d+) seconds'\)/g, 'NOW() + INTERVAL $1 SECOND')
-    .replace(/\bINTEGER PRIMARY KEY\b/g, 'INT PRIMARY KEY')
-    .replace(/\bTEXT PRIMARY KEY\b/g, 'VARCHAR(36) PRIMARY KEY')
-    .replace(/\bTEXT NOT NULL\b/g, 'VARCHAR(255) NOT NULL')
-    .replace(/\bTEXT UNIQUE\b/g, 'VARCHAR(255) UNIQUE')
-    .replace(/\bREAL\b/g, 'DECIMAL(10,2)')
-    .replace(/\bINTEGER\b/g, 'INT')
-    .replace(/\bTEXT\b/g, 'VARCHAR(255)');
-  // MySQL doesn't support CREATE INDEX IF NOT EXISTS — strip it
-  s = s.replace(/CREATE\s+(UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS/gi, 'CREATE $1INDEX');
-  return s;
-}
-
-const schemaMysqlPath = path.join(process.cwd(), 'src', 'db', 'schema.mysql.sql');
-if (fs.existsSync(schemaMysqlPath)) {
-  const schema = fs.readFileSync(schemaMysqlPath, 'utf-8');
-  const stmts = schema.split(';').map(s => s.trim()).filter(Boolean);
-  for (const stmt of stmts) {
-    if (!stmt) continue;
-    // schema.mysql.sql is already MySQL-native — don't apply translateExec (it would convert TEXT to VARCHAR(255))
-    try { await pool.query(stmt); } catch (e: any) { if (!e.message?.includes('already exists') && !e.message?.toLowerCase().includes('duplicate')) console.error('[DB] Schema:', e.message); }
-  }
-}
-
-const db = {
-  prepare: (sql: string) => {
-    if (sql.includes('PRAGMA table_info')) {
-      const table = sql.match(/PRAGMA table_info\(([^)]+)\)/)?.[1]?.replace(/['"]/g, '');
-      return {
-        all: async (..._params: any[]): Promise<any[]> => {
-          const conn = txnStore.getStore();
-          const [rows] = await (conn ?? pool).query(`SELECT ordinal_position as cid, column_name as name, column_type as type, CASE WHEN is_nullable = 'NO' THEN 1 ELSE 0 END as notnull, column_default as dflt_value, CASE WHEN column_key = 'PRI' THEN 1 ELSE 0 END as pk FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? ORDER BY ordinal_position`, [table]);
-          return rows as any[];
-        },
-        get: async (..._params: any[]): Promise<any> => {
-          const conn = txnStore.getStore();
-          const [rows] = await (conn ?? pool).query(`SELECT ordinal_position as cid, column_name as name, column_type as type, CASE WHEN is_nullable = 'NO' THEN 1 ELSE 0 END as notnull, column_default as dflt_value, CASE WHEN column_key = 'PRI' THEN 1 ELSE 0 END as pk FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? ORDER BY ordinal_position`, [table]);
-          return (rows as any[])[0];
-        },
-        run: async (): Promise<any> => ({ changes: 0, lastInsertRowid: 0 }),
-      };
-    }
-    let finalSql = translateSql(sql);
-    if (finalSql.includes('ON CONFLICT')) {
-      finalSql = finalSql.replace(/ON CONFLICT\([^)]+\) DO UPDATE SET (.+?)(?:, updated_at = (?:datetime\('now'\)|NOW\(\)))?$/s, (_match: string, setClause: string) => {
-        // Replace excluded.col with VALUES(col) for MySQL
-        const mysqlSet = setClause.replace(/excluded\.(\w+)/g, 'VALUES($1)');
-        return `ON DUPLICATE KEY UPDATE ${mysqlSet}, updated_at = NOW()`;
-      });
-      finalSql = finalSql.replace(/ON CONFLICT\([^)]+\) DO NOTHING/g, 'ON DUPLICATE KEY UPDATE id=id');
-      finalSql = finalSql.replace(/INSERT OR REPLACE/g, 'REPLACE').replace(/INSERT OR IGNORE/g, 'INSERT IGNORE');
-    }
-    finalSql = finalSql.replace(/INSERT OR REPLACE/g, 'REPLACE').replace(/INSERT OR IGNORE/g, 'INSERT IGNORE');
-    return {
-      get: async (...params: any[]): Promise<any> => {
-        const conn = txnStore.getStore();
-        const [rows] = await (conn ?? pool).query(finalSql, params);
-        return (rows as any[])[0];
-      },
-      all: async (...params: any[]): Promise<any[]> => {
-        const conn = txnStore.getStore();
-        const [rows] = await (conn ?? pool).query(finalSql, params);
-        return rows as any[];
-      },
-      run: async (...params: any[]): Promise<any> => {
-        const conn = txnStore.getStore();
-        const [result] = await (conn ?? pool).query(finalSql, params) as any;
-        return { changes: result.affectedRows ?? 0, lastInsertRowid: result.insertId };
-      },
-    };
-  },
-  exec: async (sql: string): Promise<void> => {
-    const stmts = sql.split(';').map(s => s.trim()).filter(Boolean);
-    const conn = txnStore.getStore();
-    for (const stmt of stmts) {
-      if (!stmt) continue;
-      const t = translateExec(stmt);
-      if (t.includes('PRAGMA')) continue;
-      try {
-        await (conn ?? pool).query(t);
-      } catch (e: any) {
-        const msg = e.message ?? '';
-        if (msg.includes('already exists') || msg.toLowerCase().includes('duplicate') || msg.includes('ER_DUP_ENTRY')) continue;
-        console.error('[DB] exec failed:', msg);
-        throw e;
-      }
-    }
-  },
-  pragma: (_?: string) => {},
-  transaction: <TArgs extends any[]>(fn: (...args: TArgs) => any) => {
-    return async (...args: TArgs) => {
-      const existingConn = txnStore.getStore();
-      if (existingConn) {
-        const sp = `sp_${randomUUID().slice(0, 8)}`;
-        await existingConn.query(`SAVEPOINT ${sp}`);
-        try {
-          const result = await txnStore.run(existingConn, async () => await fn(...args));
-          await existingConn.query(`RELEASE SAVEPOINT ${sp}`);
-          return result;
-        } catch (e) {
-          try { await existingConn.query(`ROLLBACK TO SAVEPOINT ${sp}`); } catch (rbErr) { console.error('[DB] Savepoint rollback failed:', rbErr); }
-          throw e;
-        }
-      }
-      const conn = await pool.getConnection();
-      try {
-        await conn.beginTransaction();
-        const result = await txnStore.run(conn, async () => await fn(...args));
-        await conn.commit();
-        return result;
-      } catch (e) {
-        try { await conn.rollback(); } catch (rbErr) { console.error('[DB] Transaction rollback failed:', rbErr); }
-        throw e;
-      } finally {
-        conn.release();
-      }
-    };
-  },
-};
 
 async function getAppliedVersions(): Promise<Set<number>> {
   try {
-    const rows = await db.prepare('SELECT version FROM schema_migrations').all();
+    const rows = (await db.prepare('SELECT version FROM schema_migrations').all()) as any[];
     return new Set(rows.map((r: any) => r.version));
   } catch {
     return new Set();
@@ -221,8 +40,19 @@ async function getAppliedVersions(): Promise<Set<number>> {
 }
 
 async function hasColumn(table: string, column: string): Promise<boolean> {
-  const [rows] = await pool.query(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`, [table, column]) as any;
-  return (rows as any[]).length > 0;
+  if (!/^[a-z_][a-z0-9_]*$/i.test(table) || !/^[a-z_][a-z0-9_]*$/i.test(column)) {
+    throw new Error(`Invalid table or column name: ${table}.${column}`);
+  }
+  const rows = (await db.prepare(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`).all(table)) as any[];
+  return rows.some((r: any) => r.COLUMN_NAME === column);
+}
+
+async function hasIndex(table: string, index: string): Promise<boolean> {
+  if (!/^[a-z_][a-z0-9_]*$/i.test(table) || !/^[a-z_][a-z0-9_]*$/i.test(index)) {
+    throw new Error(`Invalid table or index name: ${table}.${index}`);
+  }
+  const rows = (await db.prepare(`SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1`).all(table, index)) as any[];
+  return rows.length > 0;
 }
 
 async function addColumnIfMissing(table: string, column: string, ddl: string): Promise<void> {
@@ -230,7 +60,7 @@ async function addColumnIfMissing(table: string, column: string, ddl: string): P
     throw new Error(`Invalid table or column name: ${table}.${column}`);
   }
   if (await hasColumn(table, column)) return;
-  await db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl.replace(/TEXT/g, 'VARCHAR(255)').replace(/REAL/g, 'DECIMAL(10,2)')}`);
+  await db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
 }
 
 const migrations: Array<{ version: number; name: string; up: () => Promise<void> }> = [
@@ -238,10 +68,10 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
     version: 1,
     name: 'legacy-baseline',
     up: async () => {
-      await addColumnIfMissing('attendance', 'pause_start_time', 'pause_start_time TEXT');
-      await addColumnIfMissing('attendance', 'pause_end_time', 'pause_end_time TEXT');
-      await addColumnIfMissing('attendance', 'pause_minutes', 'pause_minutes REAL DEFAULT 0');
-      await db.exec(`CREATE TABLE IF NOT EXISTS holidays (id VARCHAR(36) PRIMARY KEY, date DATE NOT NULL, name VARCHAR(255) NOT NULL, type VARCHAR(20) NOT NULL DEFAULT 'public', created_by VARCHAR(36), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL)`);
+      await addColumnIfMissing('attendance', 'pause_start_time', 'pause_start_time DATETIME');
+      await addColumnIfMissing('attendance', 'pause_end_time', 'pause_end_time DATETIME');
+      await addColumnIfMissing('attendance', 'pause_minutes', 'pause_minutes DECIMAL(5,2) DEFAULT 0');
+      await db.exec(`CREATE TABLE IF NOT EXISTS holidays (id VARCHAR(36) PRIMARY KEY, date DATE NOT NULL, name VARCHAR(255) NOT NULL, type VARCHAR(20) NOT NULL DEFAULT 'public', created_by VARCHAR(36) NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL)`);
       await db.exec(`CREATE TABLE IF NOT EXISTS holiday_assignees (holiday_id VARCHAR(36) NOT NULL, user_id VARCHAR(36) NOT NULL, PRIMARY KEY (holiday_id, user_id), FOREIGN KEY (holiday_id) REFERENCES holidays(id) ON DELETE CASCADE, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)`);
       await db.exec(`CREATE TABLE IF NOT EXISTS password_reset_tokens (id VARCHAR(36) PRIMARY KEY, user_id VARCHAR(36) NOT NULL, token_hash VARCHAR(255) NOT NULL, expires_at DATETIME NOT NULL, used_at DATETIME, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)`);
       await db.exec('CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance(date)');
@@ -251,12 +81,12 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       await addColumnIfMissing('task_approvals', 'request_comment', 'request_comment TEXT');
       await db.exec('DROP TABLE IF EXISTS time_entries');
       await db.exec('DROP TABLE IF EXISTS chat_messages');
-      await db.exec(`CREATE TABLE IF NOT EXISTS token_blacklist (user_id TEXT PRIMARY KEY, revoked_at TEXT NOT NULL DEFAULT (datetime('now')), expires_at TEXT NOT NULL)`);
-      await db.exec("CREATE TABLE IF NOT EXISTS app_settings (`key` TEXT PRIMARY KEY, `value` TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime('now')))");
-      await db.exec("CREATE TABLE IF NOT EXISTS rate_limits (`key` TEXT PRIMARY KEY, hits INTEGER NOT NULL DEFAULT 0, expires_at TEXT NOT NULL)");
+      await db.exec(`CREATE TABLE IF NOT EXISTS token_blacklist (user_id VARCHAR(36) PRIMARY KEY, revoked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, expires_at DATETIME NOT NULL)`);
+      await db.exec("CREATE TABLE IF NOT EXISTS app_settings (`key` VARCHAR(255) PRIMARY KEY, `value` TEXT NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)");
+      await db.exec("CREATE TABLE IF NOT EXISTS rate_limits (`key` VARCHAR(255) PRIMARY KEY, hits INT NOT NULL DEFAULT 0, expires_at DATETIME NOT NULL)");
       await db.exec('CREATE INDEX IF NOT EXISTS idx_token_blacklist_expires ON token_blacklist(expires_at)');
       await db.exec('CREATE INDEX IF NOT EXISTS idx_rate_limits_expires ON rate_limits(expires_at)');
-      await addColumnIfMissing('team_members', 'role', "role TEXT NOT NULL DEFAULT 'member'");
+      await addColumnIfMissing('team_members', 'role', "role VARCHAR(20) NOT NULL DEFAULT 'member'");
       await db.exec("UPDATE users SET role = 'director' WHERE role = 'admin'");
       await db.exec("UPDATE activity_logs SET entity_type = 'director' WHERE entity_type = 'admin'");
       await db.exec('CREATE INDEX IF NOT EXISTS idx_work_plans_user ON work_plans(user_id)');
@@ -273,11 +103,11 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       await db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_employee_id ON users(employee_id)');
       await db.exec(`CREATE TABLE IF NOT EXISTS api_cache (cache_key VARCHAR(255) PRIMARY KEY, data TEXT NOT NULL, expires_at DATETIME NOT NULL)`);
       await db.exec('CREATE INDEX IF NOT EXISTS idx_api_cache_expires ON api_cache(expires_at)');
-      await addColumnIfMissing('leaves', 'deducted_from', 'deducted_from TEXT');
-      await addColumnIfMissing('attendance', 'latitude', 'latitude REAL');
-      await addColumnIfMissing('attendance', 'longitude', 'longitude REAL');
-      await addColumnIfMissing('attendance', 'location_accuracy', 'location_accuracy REAL');
-      await addColumnIfMissing('attendance', 'location_captured_at', 'location_captured_at TEXT');
+      await addColumnIfMissing('leaves', 'deducted_from', 'deducted_from VARCHAR(20)');
+      await addColumnIfMissing('attendance', 'latitude', 'latitude DECIMAL(10,7)');
+      await addColumnIfMissing('attendance', 'longitude', 'longitude DECIMAL(10,7)');
+      await addColumnIfMissing('attendance', 'location_accuracy', 'location_accuracy DECIMAL(10,2)');
+      await addColumnIfMissing('attendance', 'location_captured_at', 'location_captured_at DATETIME');
     },
   },
   {
@@ -319,26 +149,26 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
     version: 5,
     name: 'holidays-updated-at',
     up: async () => {
-      await addColumnIfMissing('holidays', 'updated_at', "updated_at TEXT NOT NULL DEFAULT (datetime('now'))");
+      await addColumnIfMissing('holidays', 'updated_at', "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
     },
   },
   {
     version: 6,
     name: 'leave-extra-carryover-and-attendance-events',
     up: async () => {
-      await addColumnIfMissing('leaves', 'extra', 'extra INTEGER NOT NULL DEFAULT 0');
-      await addColumnIfMissing('leaves', 'leave_year', 'leave_year INTEGER');
+      await addColumnIfMissing('leaves', 'extra', 'extra INT NOT NULL DEFAULT 0');
+      await addColumnIfMissing('leaves', 'leave_year', 'leave_year INT');
       await db.exec(`CREATE TABLE IF NOT EXISTS attendance_events (
-        id TEXT PRIMARY KEY,
-        attendance_id TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        event_type TEXT NOT NULL,
-        occurred_at TEXT NOT NULL,
-        latitude REAL,
-        longitude REAL,
-        location_accuracy REAL,
-        location_captured_at TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        id VARCHAR(36) PRIMARY KEY,
+        attendance_id VARCHAR(36) NOT NULL,
+        user_id VARCHAR(36) NOT NULL,
+        event_type VARCHAR(20) NOT NULL,
+        occurred_at DATETIME NOT NULL,
+        latitude DECIMAL(10,7),
+        longitude DECIMAL(10,7),
+        location_accuracy DECIMAL(10,2),
+        location_captured_at DATETIME,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (attendance_id) REFERENCES attendance(id) ON DELETE CASCADE,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       )`);
@@ -360,15 +190,15 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
     version: 8,
     name: 'extended-user-profile-dob-gender-address',
     up: async () => {
-      await addColumnIfMissing('users', 'dob', 'dob TEXT');
-      await addColumnIfMissing('users', 'gender', 'gender TEXT');
-      await addColumnIfMissing('users', 'father_name', 'father_name TEXT');
-      await addColumnIfMissing('users', 'nationality', 'nationality TEXT');
-      await addColumnIfMissing('users', 'qualification', 'qualification TEXT');
-      await addColumnIfMissing('users', 'address_street', 'address_street TEXT');
-      await addColumnIfMissing('users', 'address_city', 'address_city TEXT');
-      await addColumnIfMissing('users', 'address_state', 'address_state TEXT');
-      await addColumnIfMissing('users', 'address_pincode', 'address_pincode TEXT');
+      await addColumnIfMissing('users', 'dob', 'dob DATE');
+      await addColumnIfMissing('users', 'gender', 'gender VARCHAR(10)');
+      await addColumnIfMissing('users', 'father_name', 'father_name VARCHAR(100)');
+      await addColumnIfMissing('users', 'nationality', 'nationality VARCHAR(56)');
+      await addColumnIfMissing('users', 'qualification', 'qualification VARCHAR(100)');
+      await addColumnIfMissing('users', 'address_street', 'address_street VARCHAR(200)');
+      await addColumnIfMissing('users', 'address_city', 'address_city VARCHAR(100)');
+      await addColumnIfMissing('users', 'address_state', 'address_state VARCHAR(100)');
+      await addColumnIfMissing('users', 'address_pincode', 'address_pincode VARCHAR(6)');
     },
   },
   {
@@ -377,19 +207,19 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
     up: async () => {
       await db.exec(`
         CREATE TABLE IF NOT EXISTS document_requests (
-          id TEXT PRIMARY KEY,
-          user_id TEXT NOT NULL,
-          requested_by_id TEXT NOT NULL,
-          doc_type TEXT NOT NULL,
+          id VARCHAR(36) PRIMARY KEY,
+          user_id VARCHAR(36) NOT NULL,
+          requested_by_id VARCHAR(36) NOT NULL,
+          doc_type VARCHAR(50) NOT NULL,
           note TEXT,
-          status TEXT NOT NULL DEFAULT 'pending',
+          status VARCHAR(20) NOT NULL DEFAULT 'pending',
           reject_reason TEXT,
           fields TEXT,
-          doc_number TEXT UNIQUE,
-          issued_by_id TEXT,
-          issued_at TEXT,
-          created_at TEXT NOT NULL DEFAULT (datetime('now')),
-          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          doc_number VARCHAR(255) UNIQUE,
+          issued_by_id VARCHAR(36),
+          issued_at DATETIME,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
           FOREIGN KEY (requested_by_id) REFERENCES users(id) ON DELETE CASCADE,
           FOREIGN KEY (issued_by_id) REFERENCES users(id) ON DELETE SET NULL
@@ -487,17 +317,17 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
           FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
         CREATE TABLE IF NOT EXISTS file_retention_policies (
-          id TEXT PRIMARY KEY,
-          mime_pattern TEXT NOT NULL,
-          retention_days INTEGER NOT NULL DEFAULT 365,
-          max_size_bytes INTEGER,
-          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+          id VARCHAR(36) PRIMARY KEY,
+          mime_pattern VARCHAR(100) NOT NULL,
+          retention_days INT NOT NULL DEFAULT 365,
+          max_size_bytes INT,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
         CREATE INDEX IF NOT EXISTS idx_file_uploads_user ON file_uploads(user_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_file_uploads_mime ON file_uploads(mime_type);
       `);
       await db.prepare(
-        `REPLACE INTO file_retention_policies (id, mime_pattern, retention_days) VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?)`
+        "INSERT INTO file_retention_policies (id, mime_pattern, retention_days) VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?), (?, ?, ?)"
       ).run('1', 'image/*', 365, '2', 'application/pdf', 730, '3', 'text/*', 365, '4', '*', 180);
     },
   },
@@ -540,20 +370,19 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
           request_size INT,
           response_time_ms INT,
           error_message TEXT,
-          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE INDEX IF NOT EXISTS idx_api_audit_log_user ON api_audit_log(user_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_api_audit_log_path ON api_audit_log(path, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_api_audit_log_created ON api_audit_log(created_at);
       `);
-      const existing = await db.prepare('SELECT id FROM password_policies LIMIT 1').get();
+      const existing = await db.prepare('SELECT id FROM password_policies LIMIT 1').get() as any;
       if (!existing) {
-        const { randomUUID } = await import('crypto');
+        const id = uuid();
         await db.prepare(
           "INSERT INTO password_policies (id, min_length, require_uppercase, require_lowercase, require_number, require_special, max_age_days, history_count) VALUES (?, 12, 1, 1, 1, 1, 90, 5)"
-        ).run(randomUUID());
+        ).run(id);
       }
     },
   },
@@ -603,7 +432,7 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
           actual_hours DECIMAL(10,2) NOT NULL DEFAULT 0,
           overtime_hours DECIMAL(10,2) NOT NULL DEFAULT 0,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           UNIQUE KEY unique_user_month (user_id, year, month)
         );
         CREATE INDEX IF NOT EXISTS idx_monthly_overtime_user ON monthly_overtime(user_id, year, month);
@@ -614,37 +443,55 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
     version: 18,
     name: 'holidays-unique-date-constraint',
     up: async () => {
-      await db.exec(`ALTER TABLE holidays ADD UNIQUE KEY uk_holidays_date (date)`);
+      if (await hasIndex('holidays', 'uk_holidays_date')) return;
+      const duplicate = await db.prepare('SELECT date, COUNT(*) AS count FROM holidays GROUP BY date HAVING count > 1 LIMIT 1').get() as any;
+      if (duplicate) {
+        throw new Error(`Cannot add unique holiday date constraint: duplicate holiday date ${duplicate.date}`);
+      }
+      await db.exec('ALTER TABLE holidays ADD UNIQUE KEY uk_holidays_date (date)');
+    },
+  },
+  {
+    version: 19,
+    name: 'audit-log-preserve-deleted-users',
+    up: async () => {
+      const fk = await db.prepare(
+        `SELECT CONSTRAINT_NAME AS name
+         FROM information_schema.KEY_COLUMN_USAGE
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'api_audit_log'
+           AND COLUMN_NAME = 'user_id'
+           AND REFERENCED_TABLE_NAME = 'users'
+         LIMIT 1`
+      ).get() as any;
+      if (!fk?.name) return;
+      if (!/^[A-Za-z0-9_]+$/.test(fk.name)) {
+        throw new Error(`Unsafe audit log foreign key name: ${fk.name}`);
+      }
+      await db.exec(`ALTER TABLE api_audit_log DROP FOREIGN KEY \`${fk.name}\``);
     },
   },
 ];
 
 await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
-  version INTEGER PRIMARY KEY,
-  name TEXT NOT NULL,
-  applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+  version INT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 )`);
 
 const appliedVersions = await getAppliedVersions();
 for (const m of migrations) {
   if (appliedVersions.has(m.version)) continue;
-  const trx = db.transaction(async () => {
+  try {
     await m.up();
     await db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(m.version, m.name);
-  });
-  await trx();
-  console.log(`[DB] Applied migration ${m.version}: ${m.name}`);
+    console.log(`[DB] Applied migration ${m.version}: ${m.name}`);
+  } catch (e: any) {
+    // A failed migration is deliberately NOT recorded, so it is retried (and stays
+    // visible as failing) on the next start instead of being silently marked done.
+    console.error(`[DB] Migration ${m.version} (${m.name}) FAILED:`, e.message);
+    if (process.env.NODE_ENV === 'production') throw e;
+  }
 }
 
 export default db;
-export { pool };
-export function uuid(): string { return randomUUID(); }
-
-export async function getSetting(key: string): Promise<string | null> {
-  const [rows] = await pool.query('SELECT `value` FROM app_settings WHERE `key` = ?', [key]) as any;
-  return (rows as any[])[0]?.value ?? null;
-}
-
-export async function setSetting(key: string, value: string | null): Promise<void> {
-  await pool.query("INSERT INTO app_settings (`key`, `value`, updated_at) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), updated_at = NOW()", [key, value ?? '']);
-}

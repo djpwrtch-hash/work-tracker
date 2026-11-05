@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 dotenv.config();
-import { ensureAdminBootstrap } from './bootstrap';
+import { ensureAdminBootstrap } from './bootstrap.js';
 
 async function setup() {
   const adminEmail = process.env.ADMIN_EMAIL;

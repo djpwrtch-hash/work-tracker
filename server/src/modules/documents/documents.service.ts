@@ -1,8 +1,8 @@
-import db, { uuid } from '../../db';
-import { getIO } from '../../lib/socket';
-import { AppError } from '../../lib/app-error';
-import { documentFieldSchemas, DOC_TYPE_LABELS, DOC_TYPE_CODES, type DocType } from './documents.schema';
-import { sendDocumentReady } from '../../lib/email';
+import db, { uuid } from '../../db/index.js';
+import { getIO } from '../../lib/socket.js';
+import { AppError } from '../../lib/app-error.js';
+import { documentFieldSchemas, DOC_TYPE_LABELS, DOC_TYPE_CODES, type DocType } from './documents.schema.js';
+import { sendDocumentReady } from '../../lib/email.js';
 
 const SELECT = `
   SELECT d.*,
@@ -171,7 +171,7 @@ export class DocumentsService {
     // Fill any employee fields the reviewer left blank from the live employee record
     const emp = await db.prepare(
       `SELECT u.first_name, u.last_name, u.employee_id, u.designation, u.joining_date,
-              u.dob, u.qualification, u.address_street, u.address_city, u.address_state, u.address_pincode,
+              u.dob, u.qualification, u.gender, u.address_street, u.address_city, u.address_state, u.address_pincode,
               u.father_name, u.phone_number, u.email,
               dept.name AS department_name
        FROM users u LEFT JOIN departments dept ON u.department_id = dept.id WHERE u.id = ?`
@@ -186,6 +186,7 @@ export class DocumentsService {
       ].filter(Boolean);
       const snapshot: Record<string, string> = {
         employeeName: `${emp.first_name} ${emp.last_name}`.trim(),
+        gender: emp.gender ?? '',
         employeeId: emp.employee_id ?? '',
         designation: emp.designation ?? '',
         department: emp.department_name ?? '',
@@ -212,7 +213,22 @@ export class DocumentsService {
       const current = inputFields[key];
       if (current === undefined || current === null || current === '') inputFields[key] = value;
     }
-  }
+   }
+
+    // Salary slip alias mapping: frontend uses daysWorked/basicPay/travellingAllowance, backend expects paidDays/basic/conveyance
+    if (doc.doc_type === 'salary_slip') {
+      const f: any = inputFields;
+      if (f.daysWorked !== undefined && f.paidDays === undefined) f.paidDays = f.daysWorked;
+      if (f.basicPay !== undefined && f.basic === undefined) f.basic = f.basicPay;
+      if (f.travellingAllowance !== undefined && f.conveyance === undefined) f.conveyance = f.travellingAllowance;
+      if (f.dearnessAllowance !== undefined && f.hra === undefined) f.hra = f.dearnessAllowance;
+      if (f.variablePay !== undefined && f.specialAllowance === undefined) f.specialAllowance = f.variablePay;
+      // lopDays optional, ensure number
+      if (f.advancePaid !== undefined && f.otherDeductions === undefined) f.otherDeductions = f.advancePaid;
+      // Ensure required fields have defaults if still missing
+      if (f.paidDays === undefined || f.paidDays === '') f.paidDays = 30;
+      if (f.basic === undefined || f.basic === '') f.basic = 0;
+    }
 
     const parsed = fieldSchema.safeParse(inputFields);
     if (!parsed.success) {
@@ -240,16 +256,16 @@ export class DocumentsService {
       if (doc.doc_type === 'appointment_letter') {
         dn = `SSPT/HR/${year}/${String(seq + 1).padStart(4, '0')}`;
       } else if (doc.doc_type === 'leaving_certificate') {
-        dn = `SSPTPL/HR /${year.toString().slice(-2)}`;
+        dn = `SSPTPL/HR /${year.toString().slice(-2)}/${String(seq + 1).padStart(4, '0')}`;
       } else if (doc.doc_type === 'internship_certificate') {
-        dn = `SSPTPL/HR /${year.toString().slice(-2)}`;
+        dn = `SSPTPL/HR /${year.toString().slice(-2)}/${String(seq + 1).padStart(4, '0')}`;
       } else if (doc.doc_type === 'experience_certificate') {
         dn = null; // Experience certificates don't have reference numbers
       } else {
         dn = `WT-${code}-${year}-${String(seq + 1).padStart(4, '0')}`;
       }
 
-      await db.prepare("UPDATE document_requests SET status = 'issued', fields = ?, doc_number = ?, issued_by_id = ?, issued_at = datetime('now'), updated_at = datetime('now') WHERE id = ?")
+      await db.prepare("UPDATE document_requests SET status = 'issued', fields = ?, doc_number = ?, issued_by_id = ?, issued_at = NOW(), updated_at = NOW() WHERE id = ?")
         .run(JSON.stringify(fields), dn, reviewedById, id);
       return { doc: mapDoc(await db.prepare(`${SELECT} WHERE d.id = ?`).get(id)), docNumber: dn || 'N/A' };
     })();
@@ -280,7 +296,7 @@ export class DocumentsService {
     if (!doc) throw new AppError(404, 'Document request not found');
     if (doc.status !== 'pending') throw new AppError(409, `Only pending requests can be rejected (current status: ${doc.status})`);
 
-    await db.prepare("UPDATE document_requests SET status = 'rejected', reject_reason = ?, updated_at = datetime('now') WHERE id = ?")
+    await db.prepare("UPDATE document_requests SET status = 'rejected', reject_reason = ?, updated_at = NOW() WHERE id = ?")
       .run(reason ?? null, id);
     const updated = mapDoc(await db.prepare(`${SELECT} WHERE d.id = ?`).get(id));
 
@@ -302,7 +318,7 @@ export class DocumentsService {
     if (!doc) throw new AppError(404, 'Document request not found');
     if (doc.user_id !== userId && !isAdminRole(role)) throw new AppError(403, 'Forbidden');
     if (doc.status !== 'pending') throw new AppError(409, 'Only pending requests can be cancelled');
-    await db.prepare("UPDATE document_requests SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?").run(id);
+    await db.prepare("UPDATE document_requests SET status = 'cancelled', updated_at = NOW() WHERE id = ?").run(id);
     return mapDoc(await db.prepare(`${SELECT} WHERE d.id = ?`).get(id));
   }
 

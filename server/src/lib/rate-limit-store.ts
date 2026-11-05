@@ -1,4 +1,5 @@
-import db from '../db';
+import { createHash } from 'crypto';
+import db from '../db/index.js';
 
 interface IncrementResponse {
   totalHits: number;
@@ -26,7 +27,11 @@ export class RateLimitStore {
   }
 
   private prefixed(key: string): string {
-    return this.keyPrefix + key;
+    const prefixed = this.keyPrefix + key;
+    // rate_limits.key is VARCHAR(255). Hash unusually long keys (e.g. a
+    // max-length email) so the insert cannot overflow and fail closed.
+    if (prefixed.length <= 255) return prefixed;
+    return `${this.keyPrefix}sha256:${createHash('sha256').update(key).digest('hex')}`;
   }
 
   async increment(key: string): Promise<IncrementResponse> {
@@ -48,8 +53,22 @@ export class RateLimitStore {
       const row = await db.prepare('SELECT hits, expires_at FROM rate_limits WHERE `key` = ?').get(pk) as any;
       return { totalHits: row?.hits ?? 1, resetTime: new Date(row?.expires_at ?? resetStr) };
     } catch (err) {
-      console.error('[RATE-LIMIT] Store unavailable, failing open:', err);
-      return { totalHits: 1, resetTime: new Date(Date.now() + this.windowMs) };
+      console.error('[RATE-LIMIT] Store unavailable, failing closed:', err);
+      // Fail-closed: block request when DB is down (do not allow unlimited brute-force)
+      return { totalHits: 999999, resetTime: new Date(Date.now() + this.windowMs) };
+    }
+  }
+
+  // Read-only view of the current counter, used by callers that need the number
+  // of attempts without incrementing (e.g. deciding whether to send a security alert).
+  async getHits(key: string): Promise<number> {
+    try {
+      const now = new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+      const row = await db.prepare('SELECT hits FROM rate_limits WHERE `key` = ? AND expires_at > ?').get(this.prefixed(key), now) as any;
+      return row?.hits ?? 0;
+    } catch (err) {
+      console.error('[RATE-LIMIT] Store unavailable during getHits:', err);
+      return 0;
     }
   }
 
@@ -62,7 +81,12 @@ export class RateLimitStore {
   }
 
   async resetKey(key: string): Promise<void> {
-    await db.prepare('DELETE FROM rate_limits WHERE `key` = ?').run(this.prefixed(key));
+    try {
+      await db.prepare('DELETE FROM rate_limits WHERE `key` = ?').run(this.prefixed(key));
+    } catch (err) {
+      // Never fail an otherwise-successful login because cleanup failed.
+      console.error('[RATE-LIMIT] Store unavailable during resetKey:', err);
+    }
   }
 
   async resetAll(): Promise<void> {
@@ -75,54 +99,3 @@ export class RateLimitStore {
   }
 }
 
-export class SlidingWindowRateLimiter {
-  private store: Map<string, { attempts: number[] }> = new Map();
-  private cleanupInterval: ReturnType<typeof setInterval>;
-
-  constructor() {
-    this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
-  }
-
-  private cleanup(): void {
-    const now = Date.now();
-    for (const [key, entry] of this.store) {
-      entry.attempts = entry.attempts.filter(t => now - t < 3600_000);
-      if (entry.attempts.length === 0) this.store.delete(key);
-    }
-  }
-
-  async increment(key: string, windowMs: number, maxAttempts: number): Promise<{ allowed: boolean; retryAfterMs: number; attempts: number }> {
-    const now = Date.now();
-    const entry = this.store.get(key) || { attempts: [] };
-    entry.attempts = entry.attempts.filter(t => now - t < windowMs);
-
-    if (entry.attempts.length >= maxAttempts) {
-      const oldestAttempt = entry.attempts[0]!;
-      const retryAfterMs = windowMs - (now - oldestAttempt);
-      return { allowed: false, retryAfterMs, attempts: entry.attempts.length };
-    }
-
-    entry.attempts.push(now);
-    this.store.set(key, entry);
-    return { allowed: true, retryAfterMs: 0, attempts: entry.attempts.length };
-  }
-
-  async getAttempts(key: string, windowMs: number): Promise<number> {
-    const now = Date.now();
-    const entry = this.store.get(key) || { attempts: [] };
-    entry.attempts = entry.attempts.filter(t => now - t < windowMs);
-    if (entry.attempts.length === 0) {
-      this.store.delete(key);
-      return 0;
-    }
-    return entry.attempts.length;
-  }
-
-  async reset(key: string): Promise<void> {
-    this.store.delete(key);
-  }
-
-  destroy(): void {
-    clearInterval(this.cleanupInterval);
-  }
-}

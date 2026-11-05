@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { AppError } from '../lib/app-error';
+import { AppError } from '../lib/app-error.js';
 
 const SAFE_MESSAGES: Record<string, string> = {
   'UNIQUE constraint failed: users.email': 'A user with this email already exists',

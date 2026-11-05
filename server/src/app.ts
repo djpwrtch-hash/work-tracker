@@ -4,43 +4,78 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import crypto from 'crypto';
-import { compressMiddleware } from './middleware/compress';
-import { requestTimeout } from './lib/timeout';
-import { concurrencyLimiter } from './lib/concurrency-limiter';
-import { auditLog } from './middleware/audit-log';
+import { compressMiddleware } from './middleware/compress.js';
+import { requestTimeout } from './lib/timeout.js';
+import { requestShutdown } from './lib/shutdown.js';
+import { concurrencyLimiter } from './lib/concurrency-limiter.js';
+import { auditLog } from './middleware/audit-log.js';
 import rateLimit from 'express-rate-limit';
 import { randomUUID } from 'crypto';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { config } from './lib/config';
-import { RateLimitStore } from './lib/rate-limit-store';
-import db from './db';
-import { errorHandler } from './middleware/error-handler';
-import { authenticate } from './middleware/authenticate';
-import { requireRole } from './middleware/rbac';
-import { swaggerSpec } from './swagger';
+import { config } from './lib/config.js';
+import { RateLimitStore } from './lib/rate-limit-store.js';
+import db from './db/index.js';
+import { errorHandler } from './middleware/error-handler.js';
+import { swaggerSpec } from './swagger.js';
 import swaggerUi from 'swagger-ui-express';
 
-import authRoutes from './modules/auth/auth.routes';
-import usersRoutes from './modules/users/users.routes';
-import departmentsRoutes from './modules/departments/departments.routes';
-import teamsRoutes from './modules/teams/teams.routes';
-import attendanceRoutes from './modules/attendance/attendance.routes';
-import tasksRoutes from './modules/tasks/tasks.routes';
-import plansRoutes from './modules/plans/plans.routes';
-import reportsRoutes from './modules/reports/reports.routes';
-import leavesRoutes from './modules/leaves/leaves.routes';
-import documentsRoutes from './modules/documents/documents.routes';
-import notificationsRoutes from './modules/notifications/notifications.routes';
-import activityLogsRoutes from './modules/activity-logs/activity-logs.routes';
-import holidaysRoutes from './modules/holidays/holidays.routes';
-import analyticsRoutes from './modules/analytics/analytics.routes';
-import systemRoutes from './modules/system/system.routes';
-import filesRoutes from './modules/files/files.routes';
-import reportTemplatesRoutes from './modules/report-templates/report-templates.routes';
-import scheduledReportsRoutes from './modules/scheduled-reports/scheduled-reports.routes';
-import securityRoutes from './modules/security/security.routes';
+import authRoutes from './modules/auth/auth.routes.js';
+import usersRoutes from './modules/users/users.routes.js';
+import departmentsRoutes from './modules/departments/departments.routes.js';
+import teamsRoutes from './modules/teams/teams.routes.js';
+import attendanceRoutes from './modules/attendance/attendance.routes.js';
+import tasksRoutes from './modules/tasks/tasks.routes.js';
+import plansRoutes from './modules/plans/plans.routes.js';
+import reportsRoutes from './modules/reports/reports.routes.js';
+import leavesRoutes from './modules/leaves/leaves.routes.js';
+import documentsRoutes from './modules/documents/documents.routes.js';
+import notificationsRoutes from './modules/notifications/notifications.routes.js';
+import activityLogsRoutes from './modules/activity-logs/activity-logs.routes.js';
+import holidaysRoutes from './modules/holidays/holidays.routes.js';
+import analyticsRoutes from './modules/analytics/analytics.routes.js';
+import systemRoutes from './modules/system/system.routes.js';
+import filesRoutes from './modules/files/files.routes.js';
+import securityRoutes from './modules/security/security.routes.js';
+
+const swaggerCsp = helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:', 'blob:'],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'", 'data:'],
+      objectSrc: ["'none'"],
+      frameSrc: ["'self'", 'blob:'],
+      frameAncestors: ["'none'"],
+    },
+  },
+});
+
+function basicAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Basic ')) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="API Docs"');
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  const decoded = Buffer.from(authHeader.slice(6), 'base64').toString();
+  const colonIdx = decoded.indexOf(':');
+  const user = colonIdx >= 0 ? decoded.slice(0, colonIdx) : decoded;
+  const pass = colonIdx >= 0 ? decoded.slice(colonIdx + 1) : '';
+  const userMatch = user === 'admin';
+  const passBuf = Buffer.from(pass || '');
+  const expectedBuf = Buffer.from(config.adminPassword);
+  const passMatch = passBuf.length === expectedBuf.length && crypto.timingSafeEqual(passBuf, expectedBuf);
+  if (userMatch && passMatch) {
+    next();
+  } else {
+    res.status(401).json({ error: 'Invalid credentials' });
+  }
+}
 
 // Clean up expired rate limit entries on startup
 RateLimitStore.resetExpired().catch(() => {});
@@ -74,6 +109,7 @@ export function createApp() {
         connectSrc: ["'self'"],
         fontSrc: ["'self'"],
         objectSrc: ["'none'"],
+        frameSrc: ["'self'", 'blob:'],
         frameAncestors: ["'none'"],
       },
     },
@@ -112,40 +148,70 @@ export function createApp() {
     store: new RateLimitStore('write'),
   });
 
-  // Health check (before rate limiter to avoid LB false positives)
-  app.get('/health', async (_req, res) => {
-    try {
-      const migr = await db.prepare('SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1').get() as any;
-      res.json({
-        status: 'ok',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        environment: config.nodeEnv,
-        version: process.env.npm_package_version || '1.0.0',
-        dbMigrationVersion: migr?.version ?? 0,
-      });
-    } catch {
-      res.status(503).json({ status: 'error', timestamp: new Date().toISOString(), dbMigrationVersion: 0 });
-    }
+  // Health check (before rate limiter, no DB required for Hostinger post-build probe)
+  app.get('/health', (_req, res) => {
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      environment: config.nodeEnv,
+      version: process.env.npm_package_version || '1.0.0',
+    });
   });
 
-  // Readiness probe - checks if database is accessible
+  // Graceful local stop, used by STOP.bat on Windows dev machines. Disabled unless
+  // STOP_TOKEN is set (a local launcher writes a random token per run). Cloud
+  // deployments never set it, so this route stays off.
+  const stopToken = process.env.STOP_TOKEN;
+  if (stopToken) {
+    app.post('/internal/stop', (req: express.Request, res: express.Response) => {
+      const provided = req.get('x-stop-token') || (req.body && req.body.token);
+      if (provided !== stopToken) {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
+      res.json({ status: 'stopping' });
+      // Reuse the graceful shutdown path in server.ts; the unref'd timer is a safety net.
+      const safety = setTimeout(() => process.exit(0), 8000);
+      safety.unref();
+      setTimeout(() => { void requestShutdown('stop endpoint'); }, 100);
+    });
+  }
+
+  // Readiness probe - the process is only useful once the schema and all
+  // migrations are in place, not merely when MySQL accepts a connection.
   app.get('/ready', async (_req, res) => {
+    const timestamp = new Date().toISOString();
     try {
       await db.prepare('SELECT 1').get();
-      res.json({ 
-        status: 'ready', 
-        timestamp: new Date().toISOString(),
-        checks: {
-          database: 'ok',
-          websocket: 'ok'
-        }
+      const migration = await db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as any;
+      const tables = await db.prepare(
+        "SELECT COUNT(*) AS count FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('users','departments','attendance','leaves','tasks','holidays')"
+      ).get() as any;
+      const version = Number(migration?.version ?? 0);
+      const tableCount = Number(tables?.count ?? 0);
+      if (version < 19 || tableCount < 6) {
+        res.status(503).json({
+          status: 'not ready',
+          timestamp,
+          checks: {
+            database: 'ok',
+            schema: version >= 19 ? 'ok' : `migration ${version}/19`,
+            coreTables: `${tableCount}/6`,
+          },
+        });
+        return;
+      }
+      res.json({
+        status: 'ready',
+        timestamp,
+        checks: { database: 'ok', schema: 'ok', coreTables: 'ok' },
       });
     } catch {
-      res.status(503).json({ 
-        status: 'not ready', 
-        timestamp: new Date().toISOString(),
-        error: 'Service dependencies not ready'
+      res.status(503).json({
+        status: 'not ready',
+        timestamp,
+        error: 'Service dependencies not ready',
       });
     }
   });
@@ -189,43 +255,39 @@ export function createApp() {
   app.use(`${api}/analytics`, analyticsRoutes);
   app.use(`${api}/system`, systemRoutes);
   app.use(`${api}/files`, filesRoutes);
-  app.use(`${api}/report-templates`, reportTemplatesRoutes);
-  app.use(`${api}/scheduled-reports`, scheduledReportsRoutes);
   app.use(`${api}/security`, securityRoutes);
 
-  // API docs - protected in production, basic auth in dev
-  if (config.nodeEnv === 'production') {
-    app.use('/api-docs', authenticate, requireRole('director'), swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-  } else {
-    const basicAuth = (req: any, res: any, next: any) => {
-      const authHeader = req.headers.authorization;
-      if (!authHeader?.startsWith('Basic ')) {
-        res.setHeader('WWW-Authenticate', 'Basic realm="API Docs"');
-        res.status(401).json({ error: 'Authentication required' });
-        return;
-      }
-      const decoded = Buffer.from(authHeader.slice(6), 'base64').toString();
-      const colonIdx = decoded.indexOf(':');
-      const user = colonIdx >= 0 ? decoded.slice(0, colonIdx) : decoded;
-      const pass = colonIdx >= 0 ? decoded.slice(colonIdx + 1) : '';
-      const userMatch = user === 'admin';
-      const passBuf = Buffer.from(pass || '');
-      const expectedBuf = Buffer.from(config.adminPassword);
-      const passMatch = passBuf.length === expectedBuf.length && crypto.timingSafeEqual(passBuf, expectedBuf);
-      if (userMatch && passMatch) {
-        next();
-      } else {
-        res.status(401).json({ error: 'Invalid credentials' });
-      }
-    };
-    app.use('/api-docs', basicAuth, swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+  // API docs are opt-in in production and always protected by HTTP Basic auth.
+  const docsEnabled = process.env.ENABLE_API_DOCS != null
+    ? process.env.ENABLE_API_DOCS === 'true'
+    : config.nodeEnv !== 'production';
+  if (docsEnabled) {
+    app.use('/api-docs', swaggerCsp, basicAuth, swaggerUi.serve, swaggerUi.setup(swaggerSpec));
   }
 
-  // Hostinger Shared: serve web static export via single server process
-  if (process.env.HOSTINGER === 'true') {
+  // Single-origin: serve web static export via Express (Hostinger legacy, Docker Tunnel, or any production)
+  if (process.env.HOSTINGER === 'true' || process.env.SERVE_STATIC === 'true' || config.nodeEnv === 'production') {
     try {
-      const webOut = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../web/out');
-      if (fs.existsSync(webOut)) {
+      const webOutCandidates = [
+        path.resolve(process.cwd(), 'web', 'dist'),
+        path.resolve(process.cwd(), 'web', 'out'),
+        path.resolve(process.cwd(), '..', 'web', 'dist'),
+        path.resolve(process.cwd(), '..', 'web', 'out'),
+        path.resolve(process.cwd(), 'dist', 'web', 'dist'),
+        path.resolve(process.cwd(), 'dist', 'web', 'out'),
+        path.resolve(process.cwd(), 'release', 'web', 'dist'),
+        path.resolve(process.cwd(), 'release', 'web', 'out'),
+        path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist'),
+        path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/out'),
+        path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../web/dist'),
+        path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../web/out'),
+        path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../web/dist'),
+        path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../web/out'),
+        path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../dist/web/dist'),
+        path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../release/web/dist'),
+      ];
+      const webOut = webOutCandidates.find((candidate) => fs.existsSync(candidate));
+      if (webOut) {
         app.use(express.static(webOut));
         app.get('*', (req, res, next) => {
           if (req.path.startsWith('/api') || req.path.startsWith('/socket.io') || req.path.startsWith('/health') || req.path.startsWith('/ready') || req.path.startsWith('/api-docs')) return next();

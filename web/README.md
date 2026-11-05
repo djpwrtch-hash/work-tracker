@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# WorkTracker — Web (frontend)
 
-## Getting Started
+React 19 + Vite 8 frontend. TypeScript, Tailwind 4, TanStack Query, Socket.IO client,
+Recharts for analytics, and `xlsx` / `jspdf` / `docx` for exports.
 
-First, run the development server:
+## Commands
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run dev          # Vite dev server on http://localhost:42780 (HMR)
+npm run dev:https    # same, but HTTPS with a self-signed LAN cert (needed for geolocation)
+npm run build        # production build into web/dist
+npm run preview      # preview the production build
+npm run lint         # ESLint
+npm run typecheck    # tsc --noEmit
+npm test             # Vitest
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## How it is served in normal use
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The app runs on a **single origin**: the Express server on port **42780** serves both the
+API and this built frontend (`web/dist`). The browser therefore talks to the same origin
+for pages, `/api/*` and the Socket.IO connection.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+In **dev mode** Vite keeps port 42780 and proxies `/api` and `/socket.io` to the API on
+port 42781 (see `web/vite.config.ts` and `web/.env.example`).
 
-## Learn More
+## Environment
 
-To learn more about Next.js, take a look at the following resources:
+| Variable | Purpose |
+|----------|---------|
+| `VITE_API_URL` | Absolute API origin. Leave empty locally to use the page origin. |
+| `VITE_API_PORT` | Dev-only proxy target for the API (default `42781`). |
+| `WEB_PORT` | Dev server port (default `42780`). |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Source layout
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+src/
+├── pages/        # 23 routed pages (lazy loaded)
+├── components/   # shared UI (ErrorBoundary, Toast, ConfirmDialog, uploads, charts)
+├── context/      # AuthContext with JWT refresh
+├── lib/          # api client, tokenStore, socket, utils, documentTemplates, env, location
+└── types/        # shared TypeScript interfaces
+```

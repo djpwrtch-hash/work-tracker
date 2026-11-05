@@ -1,5 +1,5 @@
-import db from '../../db';
-import { AppError } from '../../lib/app-error';
+import db from '../../db/index.js';
+import { AppError } from '../../lib/app-error.js';
 
 function mapNotification(n: any) {
   return {
@@ -24,7 +24,7 @@ export class NotificationsService {
   }
 
   static async create(recipientId: string, senderId: string | null, title: string, message: string, type: string, link?: string, channel: 'in_app' | 'email' | 'both' = 'in_app') {
-    const id = (await import('../../db')).uuid();
+    const id = (await import('../../db/index.js')).uuid();
     await db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link, channel) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(id, recipientId, senderId, title, message, type, link ?? null, channel);
     return { id, recipientId, senderId, title, message, type, link, channel };
@@ -33,12 +33,12 @@ export class NotificationsService {
   static async markRead(id: string, userId: string) {
     const n = await db.prepare('SELECT id FROM notifications WHERE id = ? AND recipient_id = ?').get(id, userId);
     if (!n) throw new AppError(404, 'Notification not found');
-    await db.prepare("UPDATE notifications SET read_at = datetime('now') WHERE id = ?").run(id);
+    await db.prepare("UPDATE notifications SET read_at = NOW() WHERE id = ?").run(id);
     return { message: 'Marked as read' };
   }
 
   static async markAllRead(userId: string) {
-    await db.prepare("UPDATE notifications SET read_at = datetime('now') WHERE recipient_id = ? AND read_at IS NULL").run(userId);
+    await db.prepare("UPDATE notifications SET read_at = NOW() WHERE recipient_id = ? AND read_at IS NULL").run(userId);
     return { message: 'All notifications marked as read' };
   }
 

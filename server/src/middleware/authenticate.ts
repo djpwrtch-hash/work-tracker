@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-import { verifyAccessToken } from '../lib/jwt';
-import db from '../db';
-import { isTokenRevoked } from '../lib/blacklist';
+import { verifyAccessToken } from '../lib/jwt.js';
+import db from '../db/index.js';
+import { isTokenRevoked } from '../lib/blacklist.js';
 
 const userCache = new Map<string, { status: string; role: string; expiresAt: number }>();
 const USER_CACHE_TTL_MS = 30_000;

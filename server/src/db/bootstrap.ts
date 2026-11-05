@@ -1,5 +1,6 @@
 import bcrypt from 'bcrypt';
-import db, { uuid } from './index';
+import db, { uuid } from './index.js';
+import { generateEmployeeId } from '../lib/employee-id.js';
 
 export async function ensureAdminBootstrap() {
   const adminEmail = process.env.ADMIN_EMAIL;
@@ -32,7 +33,7 @@ export async function ensureAdminBootstrap() {
 
     const passwordHash = await bcrypt.hash(adminPassword, 12);
     await db.prepare(`INSERT INTO users (id, employee_id, first_name, last_name, email, password_hash, role, designation, department_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(uuid(), 'EMP-0001', 'Admin', 'User', adminEmail, passwordHash, 'director', 'System Administrator', finalDeptId);
+      .run(uuid(), generateEmployeeId(), 'Admin', 'User', adminEmail, passwordHash, 'director', 'System Administrator', finalDeptId);
   })();
 
   console.log('[SETUP] Admin account created successfully');

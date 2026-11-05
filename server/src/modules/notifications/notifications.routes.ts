@@ -1,8 +1,8 @@
 import { Router, Request, Response } from 'express';
-import { validate, requireUuid } from '../../middleware/validate';
-import { authenticate } from '../../middleware/authenticate';
-import { NotificationsService } from './notifications.service';
-import { listNotificationsSchema } from './notifications.schema';
+import { validate, requireUuid } from '../../middleware/validate.js';
+import { authenticate } from '../../middleware/authenticate.js';
+import { NotificationsService } from './notifications.service.js';
+import { listNotificationsSchema } from './notifications.schema.js';
 
 const router = Router();
 

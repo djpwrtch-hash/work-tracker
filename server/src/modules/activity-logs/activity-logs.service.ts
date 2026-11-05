@@ -1,5 +1,5 @@
-import db, { uuid } from '../../db';
-import { AppError } from '../../lib/app-error';
+import db, { uuid } from '../../db/index.js';
+import { AppError } from '../../lib/app-error.js';
 
 function parseJson(raw: string | null): any {
   if (!raw) return null;
@@ -7,7 +7,7 @@ function parseJson(raw: string | null): any {
 }
 
 export class ActivityLogsService {
-  static async create(userId: string, action: string, entityType?: string, entityId?: string, details?: Record<string, any>, ipAddress?: string) {
+  static async create(userId: string | null, action: string, entityType?: string, entityId?: string, details?: Record<string, any>, ipAddress?: string) {
     const id = uuid();
     await db.prepare('INSERT INTO activity_logs (id, actor_id, action, entity_type, entity_id, new_values, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(id, userId, action, entityType ?? null, entityId ?? null, details ? JSON.stringify(details) : null, ipAddress ?? null);

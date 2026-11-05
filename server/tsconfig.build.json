@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022"
+  },
+  "exclude": ["node_modules", "dist", "src/**/*.test.ts", "src/test/**/*", "src/**/*.api.test.ts", "src/test/helpers.ts", "src/test/e2e-seed.ts", "src/test/global-setup.ts"]
+}

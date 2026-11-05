@@ -31,6 +31,9 @@ export function compressMiddleware() {
     const _end = res.end.bind(res);
 
     (res as any).end = function (chunk?: any, ...args: any[]) {
+      if (res.headersSent) {
+        return _end(chunk, ...args);
+      }
       const contentType = (res.getHeader('Content-Type') as string) || '';
       const body = chunk ? (Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)) : Buffer.alloc(0);
 

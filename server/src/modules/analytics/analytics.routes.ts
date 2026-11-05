@@ -1,8 +1,8 @@
 import { Router, Request, Response } from 'express';
-import { authenticate } from '../../middleware/authenticate';
-import { requireRole } from '../../middleware/rbac';
-import { apiCache } from '../../middleware/api-cache';
-import { AnalyticsService } from './analytics.service';
+import { authenticate } from '../../middleware/authenticate.js';
+import { requireRole } from '../../middleware/rbac.js';
+import { apiCache } from '../../middleware/api-cache.js';
+import { AnalyticsService } from './analytics.service.js';
 
 const router = Router();
 

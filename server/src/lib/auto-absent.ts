@@ -1,6 +1,6 @@
-import db, { uuid, getSetting, setSetting } from '../db';
-import { getISTDate, isISTPast, isSundayIST } from './time';
-import { cache } from './cache';
+import db, { uuid, getSetting, setSetting } from '../db/index.js';
+import { getISTDate, isISTPast, isSundayIST } from './time.js';
+import { cache } from './cache.js';
 
 const CHECK_INTERVAL_MS = 300_000;
 const ABSENT_MARK_HOUR = 18;
@@ -104,7 +104,7 @@ async function markAbsentForDay(date: string, skipUserIds: string[]) {
       for (const user of chunk) {
         params.push(uuid(), user.id, date, 'absent', null, now, now);
       }
-      await db.prepare(`INSERT OR IGNORE INTO attendance (id, user_id, date, status, notes, created_at, updated_at) VALUES ${placeholders}`).run(...params);
+      await db.prepare(`INSERT IGNORE INTO attendance (id, user_id, date, status, notes, created_at, updated_at) VALUES ${placeholders}`).run(...params);
     }
   });
   await insertBatch();
