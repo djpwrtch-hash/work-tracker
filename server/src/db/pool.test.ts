@@ -10,7 +10,10 @@
 //  3. A dropped connection (PC sleep / MySQL restart) used to fail the request
 //     instead of reconnecting transparently.
 import { describe, expect, it } from 'vitest';
-import { db, resolveDbConfig, mysqlPool } from './pool.js';
+// Import through index.js so the schema + migrations are applied before these tests
+// run. Importing pool.js directly leaves a freshly recreated test database empty,
+// which made the write test fail depending on test-file order.
+import { db, resolveDbConfig, mysqlPool } from './index.js';
 
 describe('pool configuration', () => {
   it('returns DATE columns as YYYY-MM-DD strings', async () => {

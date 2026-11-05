@@ -80,14 +80,22 @@ export function getTarget(): Pool | PoolConnection {
 // query on such a connection fails; retry it once so callers get a working connection
 // instead of a transient error. mysql2 discards the dead connection from the pool, so
 // the retry lands on a fresh one. Inside a transaction there is nothing to retry.
-const STALE_CONNECTION = /PROTOCOL_CONNECTION_LOST|ECONNRESET|ETIMEDOUT|EPIPE|CONNECTION_ALREADY_CLOSED|server has gone away/i;
+const STALE_CONNECTION = /PROTOCOL_CONNECTION_LOST|ECONNRESET|ETIMEDOUT|EPIPE|CONNECTION_ALREADY_CLOSED|server has gone away|connection lost/i;
+
+// mysql2 puts the machine-readable code on `error.code`; the human-readable text can
+// differ between versions/platforms (e.g. "Connection lost: The server closed the
+// connection."). Match against both so a dropped connection is always retried.
+function isStaleConnectionError(error: unknown): boolean {
+  const e = error as { code?: unknown; message?: unknown } | null;
+  return STALE_CONNECTION.test(`${e?.code ?? ''} ${e?.message ?? String(error)}`);
+}
 
 async function queryWithRetry(sql: string, params: any[]): Promise<[any, any]> {
   try {
     const [rows, fields] = await getTarget().query(sql, params);
     return [rows, fields];
   } catch (e: any) {
-    if (als.getStore() || !STALE_CONNECTION.test(String(e?.message ?? e))) throw e;
+    if (als.getStore() || !isStaleConnectionError(e)) throw e;
     const [rows, fields] = await mysqlPool.query(sql, params);
     return [rows, fields];
   }
