@@ -113,7 +113,7 @@ function LocationCell({ latitude, longitude }: { latitude?: number | null; longi
 export default function AttendancePage() {
   const { user, loading } = useAuth();
   const qc = useQueryClient();
-  const isAdmin = user?.role === 'director' || user?.role === 'hr';
+  const isAdmin = user?.accessLevel === 'director' || user?.accessLevel === 'hr';
   const [showCalendar, setShowCalendar] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [advancedFilters, setAdvancedFilters] = useState<Record<string, any>>({});
@@ -580,7 +580,7 @@ export default function AttendancePage() {
             {data?.records && data.records.length > 0 && (
               <button onClick={() => setShowExport(true)} className="flex items-center gap-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2.5 text-sm font-medium transition border border-slate-700"><Download className="h-4 w-4" />Export</button>
             )}
-            {user?.role === 'director' && (
+            {user?.accessLevel === 'director' && (
               <button onClick={() => { setDeleteMsg(''); setDeleteText(''); setShowDeleteConfirm(true); }} className="flex items-center gap-2 rounded-xl bg-rose-600/80 hover:bg-rose-600 text-white px-4 py-2.5 text-sm font-medium transition">
                 <Trash2 className="h-4 w-4" />Clear Data
               </button>

@@ -18,7 +18,7 @@ const ExportDialog = dynamic(() => import('@/components/ExportDialog'), { ssr: f
 export default function TasksPage() {
   const { user, loading } = useAuth();
   const qc = useQueryClient();
-  const isAdmin = user?.role === 'director' || user?.role === 'hr';
+  const isAdmin = user?.accessLevel === 'director' || user?.accessLevel === 'hr';
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');

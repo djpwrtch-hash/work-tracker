@@ -9,6 +9,16 @@ CREATE TABLE IF NOT EXISTS departments (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS roles (
+  id VARCHAR(36) PRIMARY KEY,
+  name VARCHAR(50) UNIQUE NOT NULL,
+  description VARCHAR(255),
+  access_level ENUM('director','hr','employee') NOT NULL DEFAULT 'employee',
+  is_system TINYINT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS users (
   id VARCHAR(36) PRIMARY KEY,
   employee_id VARCHAR(20) UNIQUE NOT NULL,
@@ -30,7 +40,7 @@ CREATE TABLE IF NOT EXISTS users (
   address_state VARCHAR(100),
   address_pincode VARCHAR(6),
   status VARCHAR(20) NOT NULL DEFAULT 'active',
-  role VARCHAR(20) NOT NULL DEFAULT 'employee',
+  role VARCHAR(50) NOT NULL DEFAULT 'employee',
   department_id VARCHAR(36),
   failed_login_attempts INT NOT NULL DEFAULT 0,
   locked_until DATETIME,

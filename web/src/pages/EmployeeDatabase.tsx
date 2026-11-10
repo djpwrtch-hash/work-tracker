@@ -18,7 +18,7 @@ import type { DocumentRequest, DocumentsResponse, User, Department } from '@/typ
 export default function EmployeeDatabasePage() {
   const { user, loading } = useAuth();
   const qc = useQueryClient();
-  const isHrAdmin = user?.role === 'director' || user?.role === 'hr';
+  const isHrAdmin = user?.accessLevel === 'director' || user?.accessLevel === 'hr';
 
   const [search, setSearch] = useState('');
   const [deptFilter, setDeptFilter] = useState('');

@@ -69,7 +69,7 @@ export class HolidaysService {
 
     try {
       await notifyUsers(affectedUsers, userId, 'Holiday Declared', `${input.name} is a holiday on ${input.date}.`, `/holidays`);
-      const admins = await db.prepare("SELECT id FROM users WHERE role IN ('director', 'hr')").all() as any[];
+      const admins = await db.prepare("SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr')").all() as any[];
       for (const a of admins) getIO().to(`user:${a.id}`).emit('holiday:created', result);
       for (const uid of affectedUsers) getIO().to(`user:${uid}`).emit('holiday:created', result);
     } catch (e) { console.error('[Holidays] Socket emit failed:', e); }
@@ -179,7 +179,7 @@ export class HolidaysService {
     invalidateAnalyticsCache();
 
     try {
-      const admins = await db.prepare("SELECT id FROM users WHERE role IN ('director', 'hr')").all() as any[];
+      const admins = await db.prepare("SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr')").all() as any[];
       for (const a of admins) getIO().to(`user:${a.id}`).emit('holiday:deleted', { id, date: h.date });
       for (const uid of userIds) getIO().to(`user:${uid}`).emit('holiday:deleted', { id, date: h.date });
     } catch (e) { console.error('[Holidays] Socket emit failed:', e); }

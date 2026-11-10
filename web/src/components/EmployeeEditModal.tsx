@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import Modal from '@/components/Modal';
@@ -25,6 +25,8 @@ const emptyForm = {
 
 export default function EmployeeEditModal({ open, user, departments, onClose, onSaved }: EmployeeEditModalProps) {
   const qc = useQueryClient();
+  const { data: rolesRaw } = useQuery({ queryKey: ['roles'], queryFn: async () => (await api.get('/roles')).data });
+  const roles: any[] = rolesRaw?.roles ?? rolesRaw ?? [];
   const [form, setForm] = useState(emptyForm);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
@@ -199,7 +201,7 @@ export default function EmployeeEditModal({ open, user, departments, onClose, on
           <div>
             <label className="block text-sm text-slate-300 mb-1">Role *</label>
             <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white">
-              <option value="employee">Employee</option><option value="hr">HR</option><option value="director">Director</option>
+              {roles.map((r: any) => <option key={r.id ?? r.name} value={r.name}>{r.name}</option>)}
             </select>
           </div>
           <div>

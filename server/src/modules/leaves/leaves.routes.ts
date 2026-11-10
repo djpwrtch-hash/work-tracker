@@ -15,7 +15,7 @@ router.use(authenticate);
 router.get('/balance', apiCache({ ttl: 60_000 }), async (req: Request, res: Response, next) => {
   try {
     const targetId = (req.query.userId as string) || req.user!.sub;
-    if (targetId !== req.user!.sub && req.user!.role !== 'director' && req.user!.role !== 'hr') {
+    if (targetId !== req.user!.sub && req.user!.accessLevel !== 'director' && req.user!.accessLevel !== 'hr') {
       throw new AppError(403, 'Forbidden');
     }
     const rawYear = parseInt(req.query.year as string, 10);
@@ -27,21 +27,21 @@ router.get('/balance', apiCache({ ttl: 60_000 }), async (req: Request, res: Resp
 
 router.get('/', validate(listLeavesSchema, 'query'), async (req: Request, res: Response, next) => {
   try {
-    const result = await LeavesService.list(req.query as any, req.user!.sub, req.user!.role);
+    const result = await LeavesService.list(req.query as any, req.user!.sub, req.user!.accessLevel);
     res.json(result);
   } catch (err) { next(err); }
 });
 
 router.get('/:id', requireUuid('id'), async (req: Request, res: Response, next) => {
   try {
-    const leave = await LeavesService.getById(req.params.id!, req.user!.sub, req.user!.role);
+    const leave = await LeavesService.getById(req.params.id!, req.user!.sub, req.user!.accessLevel);
     res.json(leave);
   } catch (err) { next(err); }
 });
 
 router.post('/', validate(createLeaveSchema), async (req: Request, res: Response, next) => {
   try {
-    const leave = await LeavesService.create(req.user!.sub, req.body, req.user!.role);
+    const leave = await LeavesService.create(req.user!.sub, req.body, req.user!.accessLevel);
     try { await ActivityLogsService.create(req.user!.sub, 'apply', 'leave', leave.id, { type: leave.type, startDate: leave.startDate, endDate: leave.endDate }, req.ip); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     res.status(201).json(leave);
   } catch (err) { next(err); }
@@ -49,7 +49,7 @@ router.post('/', validate(createLeaveSchema), async (req: Request, res: Response
 
 router.post('/:id/review', requireRole('director', 'hr'), requireUuid('id'), validate(reviewLeaveSchema), async (req: Request, res: Response, next) => {
   try {
-    const leave = await LeavesService.review(req.params.id!, req.user!.sub, req.body.status, req.body.reviewComment, req.user!.role);
+    const leave = await LeavesService.review(req.params.id!, req.user!.sub, req.body.status, req.body.reviewComment, req.user!.accessLevel);
     try { await ActivityLogsService.create(req.user!.sub, 'review', 'leave', leave.id, { status: leave.status }, req.ip); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     res.json(leave);
   } catch (err) { next(err); }
@@ -57,7 +57,7 @@ router.post('/:id/review', requireRole('director', 'hr'), requireUuid('id'), val
 
 router.post('/:id/cancel', requireUuid('id'), async (req: Request, res: Response, next) => {
   try {
-    const leave = await LeavesService.cancel(req.params.id!, req.user!.sub, req.user!.role);
+    const leave = await LeavesService.cancel(req.params.id!, req.user!.sub, req.user!.accessLevel);
     res.json(leave);
   } catch (err) { next(err); }
 });

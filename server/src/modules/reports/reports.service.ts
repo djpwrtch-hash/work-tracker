@@ -79,7 +79,7 @@ export class ReportsService {
       if (report.user_id !== userId) throw new AppError(403, 'Cannot submit others report');
       if (report.status !== 'draft') throw new AppError(409, 'Only draft reports can be submitted');
       await db.prepare("UPDATE work_reports SET status = 'submitted', updated_at = NOW() WHERE id = ?").run(id);
-      const admins = await db.prepare("SELECT id FROM users WHERE role IN ('director', 'hr')").all() as any[];
+      const admins = await db.prepare("SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr')").all() as any[];
       const insertNotif = db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)');
       for (const a of admins) {
         await insertNotif.run(uuid(), a.id, userId, 'Report Submitted', `Daily report for ${report.date} is pending your review`, 'approval', `/reports/${id}`);

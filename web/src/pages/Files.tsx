@@ -61,7 +61,7 @@ export default function FilesPage() {
   const [showUpload, setShowUpload] = useState(false);
   const qc = useQueryClient();
   const confirmCtx = useConfirm();
-  const canDelete = user?.role === 'director' || user?.role === 'hr';
+  const canDelete = user?.accessLevel === 'director' || user?.accessLevel === 'hr';
 
   const MIME_PREFIX: Record<string, string> = { image: 'image/', document: 'application/' };
   const params: Record<string, any> = { limit: PAGE_SIZE, page };

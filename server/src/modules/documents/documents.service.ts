@@ -108,7 +108,7 @@ export class DocumentsService {
     const requester = await db.prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(requestedById) as any;
     const requesterName = requester ? `${requester.first_name} ${requester.last_name}`.trim() : 'An employee';
     const targetName = `${target.first_name} ${target.last_name}`.trim();
-    const admins = await db.prepare("SELECT id FROM users WHERE role IN ('director', 'hr') AND status = 'active'").all() as any[];
+    const admins = await db.prepare("SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr') AND u.status = 'active'").all() as any[];
     for (const a of admins) {
       if (a.id === requestedById) continue;
       const payload = {

@@ -12,7 +12,7 @@ router.use(authenticate);
 
 router.get('/', apiCache({ ttl: 60_000 }), validate(listReportsSchema, 'query'), async (req: Request, res: Response, next) => {
   try {
-    const result = await ReportsService.list(req.query as any, req.user!.sub, req.user!.role);
+    const result = await ReportsService.list(req.query as any, req.user!.sub, req.user!.accessLevel);
     res.json(result);
   } catch (err) { next(err); }
 });
@@ -38,7 +38,7 @@ router.get('/export', requireRole('director', 'hr'), async (req: Request, res: R
 
 router.get('/:id', requireUuid('id'), async (req: Request, res: Response, next) => {
   try {
-    const report = await ReportsService.getById(req.params.id!, req.user!.sub, req.user!.role);
+    const report = await ReportsService.getById(req.params.id!, req.user!.sub, req.user!.accessLevel);
     res.json(report);
   } catch (err) { next(err); }
 });
@@ -52,7 +52,7 @@ router.post('/', validate(createReportSchema), async (req: Request, res: Respons
 
 router.patch('/:id', requireUuid('id'), validate(updateReportSchema), async (req: Request, res: Response, next) => {
   try {
-    const report = await ReportsService.update(req.params.id!, req.user!.sub, req.body, req.user!.role);
+    const report = await ReportsService.update(req.params.id!, req.user!.sub, req.body, req.user!.accessLevel);
     res.json(report);
   } catch (err) { next(err); }
 });
@@ -73,7 +73,7 @@ router.post('/:id/review', requireRole('director', 'hr'), requireUuid('id'), val
 
 router.delete('/:id', requireUuid('id'), async (req: Request, res: Response, next) => {
   try {
-    const result = await ReportsService.delete(req.params.id!, req.user!.sub, req.user!.role);
+    const result = await ReportsService.delete(req.params.id!, req.user!.sub, req.user!.accessLevel);
     res.json(result);
   } catch (err) { next(err); }
 });

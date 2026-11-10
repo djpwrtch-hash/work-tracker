@@ -12,7 +12,7 @@ router.use(authenticate);
 
 router.get('/', apiCache({ ttl: 60_000 }), validate(listPlansSchema, 'query'), async (req: Request, res: Response, next) => {
   try {
-    const result = await PlansService.list(req.query as any, req.user!.sub, req.user!.role);
+    const result = await PlansService.list(req.query as any, req.user!.sub, req.user!.accessLevel);
     res.json(result);
   } catch (err) { next(err); }
 });
@@ -38,7 +38,7 @@ router.get('/export', requireRole('director', 'hr'), async (req: Request, res: R
 
 router.get('/:id', requireUuid('id'), async (req: Request, res: Response, next) => {
   try {
-    const plan = await PlansService.getById(req.params.id!, req.user!.sub, req.user!.role);
+    const plan = await PlansService.getById(req.params.id!, req.user!.sub, req.user!.accessLevel);
     res.json(plan);
   } catch (err) { next(err); }
 });
@@ -52,7 +52,7 @@ router.post('/', validate(createPlanSchema), async (req: Request, res: Response,
 
 router.patch('/:id', requireUuid('id'), validate(updatePlanSchema), async (req: Request, res: Response, next) => {
   try {
-    const plan = await PlansService.update(req.params.id!, req.user!.sub, req.body, req.user!.role);
+    const plan = await PlansService.update(req.params.id!, req.user!.sub, req.body, req.user!.accessLevel);
     res.json(plan);
   } catch (err) { next(err); }
 });
@@ -73,7 +73,7 @@ router.post('/:id/review', requireRole('director', 'hr'), requireUuid('id'), val
 
 router.delete('/:id', requireUuid('id'), async (req: Request, res: Response, next) => {
   try {
-    const result = await PlansService.delete(req.params.id!, req.user!.sub, req.user!.role);
+    const result = await PlansService.delete(req.params.id!, req.user!.sub, req.user!.accessLevel);
     res.json(result);
   } catch (err) { next(err); }
 });

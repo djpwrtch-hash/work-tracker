@@ -107,7 +107,7 @@ export default function HolidaysPage() {
     setShowCreate(true);
   };
 
-  if (!user || (user.role !== 'director' && user.role !== 'hr')) {
+  if (!user || (user.accessLevel !== 'director' && user.accessLevel !== 'hr')) {
     return <DashboardLayout><div className="text-center py-12 text-slate-500">Access denied</div></DashboardLayout>;
   }
 

@@ -7,7 +7,7 @@ import NotificationBell from './NotificationBell';
 import {
   LayoutDashboard, CalendarCheck, ClipboardList, FileText, CalendarDays,
   LogOut, Menu, History, Users, Building2, UserCog, BarChart3,
-  Sun, ScrollText, Settings, FileBadge, Database, FolderOpen, Shield,
+  Sun, ScrollText, Settings, FileBadge, Database, FolderOpen, Shield, ShieldCheck,
 } from 'lucide-react';
 
 const Sidebar = ({ mobile = false, nav, pathname, handleMobileClose, user, logout }: { mobile?: boolean; nav: any[]; pathname: string; handleMobileClose: () => void; user: any; logout: () => void }) => (
@@ -63,8 +63,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = prevOverflow; };
   }, [mobileOpen]);
-  const isAdmin = user?.role === 'director';
-  const isHr = user?.role === 'hr';
+  const isAdmin = user?.accessLevel === 'director';
+  const isHr = user?.accessLevel === 'hr';
   const isAdminOrHr = isAdmin || isHr;
 
   const nav = useMemo(() => [
@@ -80,6 +80,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { name: 'Team', href: '/team', icon: Users, show: isAdminOrHr },
     { name: 'Holidays', href: '/holidays', icon: Sun, show: isAdminOrHr },
     { name: 'Departments', href: '/departments', icon: Building2, show: isAdminOrHr },
+    { name: 'Roles', href: '/roles', icon: ShieldCheck, show: isAdminOrHr },
     { name: 'Users', href: '/users', icon: UserCog, show: isAdmin },
     { name: 'Analytics', href: '/analytics', icon: BarChart3, show: isAdminOrHr },
     { name: 'Activity Logs', href: '/logs', icon: ScrollText, show: isAdminOrHr },

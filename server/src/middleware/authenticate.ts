@@ -3,7 +3,7 @@ import { verifyAccessToken } from '../lib/jwt.js';
 import db from '../db/index.js';
 import { isTokenRevoked } from '../lib/blacklist.js';
 
-const userCache = new Map<string, { status: string; role: string; expiresAt: number }>();
+const userCache = new Map<string, { status: string; role: string; accessLevel: 'director' | 'hr' | 'employee'; expiresAt: number }>();
 const USER_CACHE_TTL_MS = 30_000;
 
 const userCacheCleanupInterval: ReturnType<typeof setInterval> = setInterval(() => {
@@ -26,7 +26,8 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
   }
 
   try {
-    req.user = verifyAccessToken(token);
+    const payload = verifyAccessToken(token);
+    req.user = { ...payload, accessLevel: 'employee' };
     try {
       if (await isTokenRevoked(req.user.sub, req.user.iat)) {
         res.status(401).json({ error: 'Token revoked' });
@@ -46,19 +47,27 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
         return;
       }
       req.user.role = cached.role;
+      req.user.accessLevel = cached.accessLevel;
       next();
       return;
     }
 
-    const user = await db.prepare('SELECT status, role FROM users WHERE id = ?').get(req.user.sub) as any;
+    const user = await db.prepare(
+      `SELECT u.status, u.role, COALESCE(r.access_level, 'employee') AS access_level
+       FROM users u
+       LEFT JOIN roles r ON r.name = u.role
+       WHERE u.id = ?`
+    ).get(req.user.sub) as any;
     if (!user || user.status !== 'active') {
-      userCache.set(req.user.sub, { status: 'inactive', role: '', expiresAt: now + USER_CACHE_TTL_MS });
+      userCache.set(req.user.sub, { status: 'inactive', role: '', accessLevel: 'employee', expiresAt: now + USER_CACHE_TTL_MS });
       res.status(401).json({ error: 'Account is inactive or suspended' });
       return;
     }
 
-    userCache.set(req.user.sub, { status: user.status, role: user.role, expiresAt: now + USER_CACHE_TTL_MS });
+    const accessLevel = user.access_level === 'director' || user.access_level === 'hr' ? user.access_level : 'employee';
+    userCache.set(req.user.sub, { status: user.status, role: user.role, accessLevel, expiresAt: now + USER_CACHE_TTL_MS });
     req.user.role = user.role;
+    req.user.accessLevel = accessLevel;
     next();
   } catch (err: any) {
     // JWT verification errors are 401; actual server errors are 503

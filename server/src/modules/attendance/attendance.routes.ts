@@ -41,7 +41,7 @@ router.post('/pause-end', validate(locationOptionalSchema), async (req: Request,
 
 router.get('/events/:attendanceId', requireUuid('attendanceId'), async (req: Request, res: Response, next) => {
   try {
-    const isAdmin = req.user!.role === 'director' || req.user!.role === 'hr';
+    const isAdmin = req.user!.accessLevel === 'director' || req.user!.accessLevel === 'hr';
     const events = isAdmin
       ? await getAttendanceEvents(req.params.attendanceId!)
       : await getAttendanceEventsForUser(req.user!.sub, req.params.attendanceId!);
@@ -94,7 +94,7 @@ router.get('/history/:userId', requireRole('director', 'hr'), requireUuid('userI
 router.get('/monthly', apiCache({ ttl: 60_000 }), validate(monthlyQuerySchema, 'query'), async (req: Request, res: Response, next) => {
   try {
     const q = req.query as any;
-    const targetUserId = (req.user!.role === 'director' || req.user!.role === 'hr') && q.userId ? q.userId : req.user!.sub;
+    const targetUserId = (req.user!.accessLevel === 'director' || req.user!.accessLevel === 'hr') && q.userId ? q.userId : req.user!.sub;
     const summary = await AttendanceService.getMonthlySummary(targetUserId, q.year, q.month);
     res.json(summary);
   } catch (err) { next(err); }

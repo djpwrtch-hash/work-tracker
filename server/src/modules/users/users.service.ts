@@ -6,6 +6,7 @@ import { generateEmployeeId } from '../../lib/employee-id.js';
 import { invalidateUserCache } from '../../middleware/authenticate.js';
 import type { CreateUserInput, UpdateUserInput, ListUsersInput } from './users.schema.js';
 import { getPasswordPolicy, validatePassword } from '../../lib/password-policy.js';
+import { roleExists } from '../../lib/roles.js';
 
 const SALT_ROUNDS = 12;
 
@@ -60,6 +61,7 @@ export class UsersService {
   }
 
   static async create(input: CreateUserInput) {
+    if (!await roleExists(input.role)) throw new AppError(400, 'Unknown role');
     const policy = await getPasswordPolicy();
     const { valid, errors } = await validatePassword(input.password, policy);
     if (!valid) throw new AppError(400, `Password does not meet policy: ${errors.join('; ')}`);
@@ -101,14 +103,17 @@ export class UsersService {
     return await this.getById(id);
   }
 
-  static async update(id: string, input: UpdateUserInput, requesterRole?: string) {
+  static async update(id: string, input: UpdateUserInput, requesterAccessLevel?: string) {
     if (!await db.prepare('SELECT id FROM users WHERE id = ?').get(id)) throw new AppError(404, 'User not found');
     const allowedFields = ['firstName', 'lastName', 'phoneNumber', 'departmentId', 'designation', 'joiningDate', 'status', 'role', 'dob', 'gender', 'fatherName', 'nationality', 'qualification', 'addressStreet', 'addressCity', 'addressState', 'addressPincode'];
     // Privilege guard: only directors may change role or status (HR would otherwise self-promote)
     const sanitized: Record<string, unknown> = { ...(input as Record<string, unknown>) };
-    if (requesterRole !== 'director') {
+    if (requesterAccessLevel !== 'director') {
       delete sanitized.role;
       delete sanitized.status;
+    }
+    if (sanitized.role !== undefined && !await roleExists(String(sanitized.role))) {
+      throw new AppError(400, 'Unknown role');
     }
     const sets: string[] = ["updated_at = NOW()"];
     const params: any[] = [];

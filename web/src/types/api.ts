@@ -4,7 +4,8 @@ export interface User {
   firstName: string;
   lastName: string;
   email: string;
-  role: 'director' | 'hr' | 'employee';
+  role: string;
+  accessLevel: 'director' | 'hr' | 'employee';
   departmentId: string | null;
   designation: string | null;
   status: 'active' | 'inactive' | 'suspended';

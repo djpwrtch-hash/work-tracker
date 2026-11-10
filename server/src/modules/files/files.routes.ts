@@ -41,7 +41,7 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
 
 router.get('/', validate(listFilesSchema, 'query'), async (req: Request, res: Response, next) => {
   try {
-    const result = await FilesService.list(req.query as any, req.user!.role, req.user!.sub);
+    const result = await FilesService.list(req.query as any, req.user!.accessLevel, req.user!.sub);
     res.json(result);
   } catch (err) { next(err); }
 });
@@ -62,7 +62,7 @@ router.post('/cleanup', requireRole('director', 'hr'), async (_req: Request, res
 
 router.get('/:id/download', requireUuid('id'), async (req: Request, res: Response, next) => {
   try {
-    const { buffer, filename, mimeType } = await FilesService.download(req.params.id!, req.user!.sub, req.user!.role);
+    const { buffer, filename, mimeType } = await FilesService.download(req.params.id!, req.user!.sub, req.user!.accessLevel);
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
     res.send(buffer);
@@ -71,7 +71,7 @@ router.get('/:id/download', requireUuid('id'), async (req: Request, res: Respons
 
 router.delete('/:id', requireUuid('id'), async (req: Request, res: Response, next) => {
   try {
-    await FilesService.delete(req.params.id!, req.user!.sub, req.user!.role);
+    await FilesService.delete(req.params.id!, req.user!.sub, req.user!.accessLevel);
     res.status(204).end();
   } catch (err) { next(err); }
 });

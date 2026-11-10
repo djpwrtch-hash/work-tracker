@@ -227,7 +227,7 @@ export class TasksService {
       }
       const id = uuid();
       await db.prepare('INSERT INTO task_approvals (id, task_id, requested_by_id, request_comment) VALUES (?, ?, ?, ?)').run(id, taskId, requestedById, comment ?? null);
-      const admins = await db.prepare("SELECT id FROM users WHERE role IN ('director', 'hr')").all() as any[];
+      const admins = await db.prepare("SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr')").all() as any[];
       const insertNotif = db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)');
       for (const a of admins) {
         await insertNotif.run(uuid(), a.id, requestedById, 'Task Approval Requested', `Task "${task.title}" is pending your review`, 'approval', `/tasks/${taskId}`);

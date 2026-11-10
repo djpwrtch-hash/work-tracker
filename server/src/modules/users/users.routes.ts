@@ -44,7 +44,7 @@ router.post('/', requireRole('director'), validate(createUserSchema), async (req
 
 router.patch('/:id', requireRole('director', 'hr'), requireUuid('id'), validate(updateUserSchema), async (req: Request, res: Response, next) => {
   try {
-    const user = await UsersService.update(req.params.id!, req.body, req.user!.role);
+    const user = await UsersService.update(req.params.id!, req.body, req.user!.accessLevel);
     cache.delContaining('/api/v1/users');
     try { await ActivityLogsService.create(req.user!.sub, 'update', 'user', req.params.id, { changes: Object.keys(req.body) }, req.ip); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     res.json(user);

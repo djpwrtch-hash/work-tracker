@@ -208,7 +208,7 @@ function EmployeeDashboard({ loading, user }: { loading: boolean; user: any }) {
 }
 
 function AdminDashboard({ loading, user }: { loading: boolean; user: any }) {
-  const isAdmin = user?.role === 'director' || user?.role === 'hr';
+  const isAdmin = user?.accessLevel === 'director' || user?.accessLevel === 'hr';
   const { data: userStats, isLoading: ul, isError: ue } = useQuery({
     queryKey: ['userStats'],
     queryFn: async () => (await api.get('/users/stats')).data,
@@ -346,7 +346,7 @@ export default function DashboardPage() {
 
   return (
     <DashboardLayout>
-      {user.role === 'employee' ? <EmployeeDashboard loading={loading} user={user} /> : <AdminDashboard loading={loading} user={user} />}
+      {user.accessLevel === 'employee' ? <EmployeeDashboard loading={loading} user={user} /> : <AdminDashboard loading={loading} user={user} />}
     </DashboardLayout>
   );
 }

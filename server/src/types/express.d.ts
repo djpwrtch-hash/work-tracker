@@ -7,6 +7,7 @@ declare global {
         sub: string;
         email: string;
         role: string;
+        accessLevel: 'director' | 'hr' | 'employee';
         iat?: number;
         exp?: number;
       };

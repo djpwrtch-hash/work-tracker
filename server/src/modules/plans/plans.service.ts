@@ -72,7 +72,7 @@ export class PlansService {
       if (plan.user_id !== userId) throw new AppError(403, 'Cannot submit others plan');
       if (plan.status !== 'draft') throw new AppError(409, 'Only draft plans can be submitted');
       await db.prepare("UPDATE work_plans SET status = 'submitted', updated_at = NOW() WHERE id = ?").run(id);
-      const admins = await db.prepare("SELECT id FROM users WHERE role IN ('director', 'hr')").all() as any[];
+      const admins = await db.prepare("SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr')").all() as any[];
       const insertNotif = db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)');
       for (const a of admins) {
         await insertNotif.run(uuid(), a.id, userId, 'Plan Submitted', `Work plan for ${plan.date} is pending your review`, 'approval', `/plans/${id}`);

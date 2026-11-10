@@ -20,6 +20,7 @@ const EmployeeDatabase = lazy(() => import('./pages/EmployeeDatabase'));
 const Team = lazy(() => import('./pages/Team'));
 const Holidays = lazy(() => import('./pages/Holidays'));
 const Departments = lazy(() => import('./pages/Departments'));
+const Roles = lazy(() => import('./pages/Roles'));
 const Users = lazy(() => import('./pages/Users'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const Logs = lazy(() => import('./pages/Logs'));
@@ -51,6 +52,7 @@ export default function AppRoutes() {
       <Route path="/team" element={<RequireRole roles={['director', 'hr']}>{withSuspense(<Team />)}</RequireRole>} />
       <Route path="/holidays" element={withSuspense(<Holidays />)} />
       <Route path="/departments" element={<RequireRole roles={['director', 'hr']}>{withSuspense(<Departments />)}</RequireRole>} />
+      <Route path="/roles" element={<RequireRole roles={['director', 'hr']}>{withSuspense(<Roles />)}</RequireRole>} />
       <Route path="/users" element={<RequireRole roles={['director']}>{withSuspense(<Users />)}</RequireRole>} />
       <Route path="/analytics" element={<RequireRole roles={['director', 'hr']}>{withSuspense(<Analytics />, <AnalyticsLoading />)}</RequireRole>} />
       <Route path="/logs" element={<RequireRole roles={['director', 'hr']}>{withSuspense(<Logs />)}</RequireRole>} />

@@ -19,7 +19,7 @@ type Tab = 'requests' | 'all';
 export default function DocumentsPage() {
   const { user, loading } = useAuth();
   const qc = useQueryClient();
-  const isHrAdmin = user?.role === 'director' || user?.role === 'hr';
+  const isHrAdmin = user?.accessLevel === 'director' || user?.accessLevel === 'hr';
 
   const [tab, setTab] = useState<Tab>('requests');
   const [showRequest, setShowRequest] = useState(false);

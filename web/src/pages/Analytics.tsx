@@ -53,7 +53,7 @@ const ManagerDashboardPanel = dynamic(() => import('./charts').then(m => m.Manag
 
 export default function AnalyticsPage() {
   const { user, loading } = useAuth();
-  const canViewAnalytics = user?.role === 'director' || user?.role === 'hr';
+  const canViewAnalytics = user?.accessLevel === 'director' || user?.accessLevel === 'hr';
   const now = new Date();
   const [monthYear, setMonthYear] = useState({ month: now.getMonth() + 1, year: now.getFullYear() });
   const [leaveYear, setLeaveYear] = useState(now.getFullYear());

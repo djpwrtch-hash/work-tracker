@@ -60,7 +60,7 @@ function LeaveBalances({ userId }: { userId: string }) {
 export default function LeavesPage() {
   const { user, loading } = useAuth();
   const qc = useQueryClient();
-  const isAdmin = user?.role === 'director' || user?.role === 'hr';
+  const isAdmin = user?.accessLevel === 'director' || user?.accessLevel === 'hr';
   const [showCreate, setShowCreate] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showExport, setShowExport] = useState(false);
@@ -355,13 +355,13 @@ export default function LeavesPage() {
           empty={isLoading ? <Loader2 className="h-6 w-6 animate-spin text-slate-500" /> : <p className="text-sm text-slate-500">No leaves</p>}
           actions={(l: any) => (
             <>
-              {isAdmin && l.status === 'pending' && (user?.role === 'director' || l.userId !== user?.id) && (
+              {isAdmin && l.status === 'pending' && (user?.accessLevel === 'director' || l.userId !== user?.id) && (
                 <>
                   <button onClick={() => reviewLeave.mutate({ id: l.id, status: 'approved' })} disabled={reviewLeave.isPending} className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-xs transition disabled:opacity-50">Approve</button>
                   <button onClick={() => reviewLeave.mutate({ id: l.id, status: 'rejected' })} disabled={reviewLeave.isPending} className="rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 text-xs transition disabled:opacity-50">Reject</button>
                 </>
               )}
-              {isAdmin && l.status === 'approved' && (user?.role === 'director' || l.userId !== user?.id) && (
+              {isAdmin && l.status === 'approved' && (user?.accessLevel === 'director' || l.userId !== user?.id) && (
                 <button onClick={() => cancelLeave.mutate(l.id)} disabled={cancelLeave.isPending} className="rounded-lg bg-slate-600 hover:bg-slate-700 text-white px-3 py-1.5 text-xs transition disabled:opacity-50">Cancel</button>
               )}
             </>

@@ -250,14 +250,14 @@ export class LeavesService {
         }
         invalidateAnalyticsCache();
 
-        const hrUsers = await db.prepare("SELECT id FROM users WHERE role = 'hr'").all() as any[];
+        const hrUsers = await db.prepare("SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level = 'hr'").all() as any[];
         const insertNotif = db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)');
         for (const a of hrUsers) {
           await insertNotif.run(uuid(), a.id, userId, 'Leave Auto-Approved', `${input.type} leave taken by director`, 'info', `/leaves/${id}`);
         }
         await insertNotif.run(uuid(), userId, userId, 'Leave Auto-Approved', `Your ${input.type} leave has been auto-approved`, 'success', `/leaves/${id}`);
       } else {
-        const admins = await db.prepare("SELECT id, email, first_name, last_name FROM users WHERE role IN ('director', 'hr')").all() as any[];
+        const admins = await db.prepare("SELECT u.id, u.email, u.first_name, u.last_name FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr')").all() as any[];
         const insertNotif = db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)');
         for (const a of admins) {
           await insertNotif.run(uuid(), a.id, userId, 'Leave Requested', `${input.type} leave request pending review`, 'approval', `/leaves/${id}`);
@@ -268,7 +268,7 @@ export class LeavesService {
     if (!isAutoApprove && isEmailConfigured()) {
       // Emails AFTER commit: gated by isEmailConfigured() — notifications are
       // the primary channel; email is optional (no SMTP = silently skipped).
-      const notifyAdmins = (await db.prepare("SELECT id, email, first_name, last_name FROM users WHERE role IN ('director', 'hr')").all()) as any[];
+      const notifyAdmins = (await db.prepare("SELECT u.id, u.email, u.first_name, u.last_name FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr')").all()) as any[];
       for (const a of notifyAdmins) {
         try { await sendLeaveNotification({ id: leaveRecord.id, type: input.type, startDate, endDate, reason: input.reason ?? undefined }, 'submitted', { id: a.id, email: a.email, firstName: a.first_name, lastName: a.last_name }); } catch (e: any) { console.error('[Email] Failed:', e.message); }
       }
@@ -279,10 +279,10 @@ export class LeavesService {
     try {
       if (isAutoApprove) {
         getIO().to(`user:${userId}`).emit('leave:reviewed', leaveRecord);
-        const hrUsers = await db.prepare("SELECT id FROM users WHERE role = 'hr'").all() as any[];
+        const hrUsers = await db.prepare("SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level = 'hr'").all() as any[];
         for (const a of hrUsers) getIO().to(`user:${a.id}`).emit('leave:applied', leaveRecord);
       } else {
-        const admins = await db.prepare("SELECT id FROM users WHERE role IN ('director', 'hr')").all() as any[];
+        const admins = await db.prepare("SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr')").all() as any[];
         for (const a of admins) getIO().to(`user:${a.id}`).emit('leave:applied', leaveRecord);
       }
     } catch (e) { console.error('[Leaves] Socket emit failed:', e); }

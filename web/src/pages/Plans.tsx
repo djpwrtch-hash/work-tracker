@@ -11,7 +11,7 @@ import Modal from '@/components/Modal';
 export default function PlansPage() {
   const { user, loading } = useAuth();
   const qc = useQueryClient();
-  const isAdmin = user?.role === 'director' || user?.role === 'hr';
+  const isAdmin = user?.accessLevel === 'director' || user?.accessLevel === 'hr';
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ plannedWork: '', priority: 'medium', estimatedHours: '', date: new Date().toISOString().split('T')[0] });
   const [error, setError] = useState('');

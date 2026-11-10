@@ -471,6 +471,71 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       await db.exec(`ALTER TABLE api_audit_log DROP FOREIGN KEY \`${fk.name}\``);
     },
   },
+  {
+    version: 20,
+    name: 'roles-master',
+    up: async () => {
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS roles (
+          id VARCHAR(36) PRIMARY KEY,
+          name VARCHAR(50) UNIQUE NOT NULL,
+          description VARCHAR(255),
+          access_level ENUM('director','hr','employee') NOT NULL DEFAULT 'employee',
+          is_system TINYINT NOT NULL DEFAULT 0,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+      `);
+
+      const systemRoles = [
+        { name: 'director', description: 'Full administrative access', accessLevel: 'director' },
+        { name: 'hr', description: 'Human resources access', accessLevel: 'hr' },
+        { name: 'employee', description: 'Standard employee access', accessLevel: 'employee' },
+      ];
+      for (const role of systemRoles) {
+        await db.prepare(
+          `INSERT INTO roles (id, name, description, access_level, is_system)
+           VALUES (?, ?, ?, ?, 1)
+           ON DUPLICATE KEY UPDATE access_level = VALUES(access_level), is_system = 1`
+        ).run(uuid(), role.name, role.description, role.accessLevel);
+      }
+
+      // Normalise legacy role values so the foreign key below cannot fail on dirty data.
+      await db.exec("UPDATE users SET role = 'employee' WHERE role IS NULL OR role = ''");
+      await db.exec('UPDATE users SET role = TRIM(role)');
+
+      // Backfill any legacy/custom role names already present on users so the FK below can be added.
+      const legacyRoles = await db.prepare('SELECT DISTINCT role FROM users WHERE role IS NOT NULL AND role <> \'\'').all() as any[];
+      for (const row of legacyRoles) {
+        const name = String(row.role);
+        const accessLevel = name === 'director' ? 'director' : name === 'hr' ? 'hr' : 'employee';
+        await db.prepare(
+          `INSERT INTO roles (id, name, description, access_level, is_system)
+           VALUES (?, ?, NULL, ?, 0)
+           ON DUPLICATE KEY UPDATE name = VALUES(name)`
+        ).run(uuid(), name, accessLevel);
+      }
+
+      await db.exec("ALTER TABLE users MODIFY role VARCHAR(50) NOT NULL DEFAULT 'employee'");
+
+      if (!(await hasIndex('users', 'idx_users_role'))) {
+        await db.exec('CREATE INDEX idx_users_role ON users(role)');
+      }
+
+      const fk = await db.prepare(
+        `SELECT CONSTRAINT_NAME AS name
+         FROM information_schema.KEY_COLUMN_USAGE
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'users'
+           AND COLUMN_NAME = 'role'
+           AND REFERENCED_TABLE_NAME = 'roles'
+         LIMIT 1`
+      ).get() as any;
+      if (!fk?.name) {
+        await db.exec('ALTER TABLE users ADD CONSTRAINT fk_users_role FOREIGN KEY (role) REFERENCES roles(name) ON UPDATE CASCADE ON DELETE RESTRICT');
+      }
+    },
+  },
 ];
 
 await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (

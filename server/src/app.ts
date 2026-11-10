@@ -24,6 +24,7 @@ import swaggerUi from 'swagger-ui-express';
 import authRoutes from './modules/auth/auth.routes.js';
 import usersRoutes from './modules/users/users.routes.js';
 import departmentsRoutes from './modules/departments/departments.routes.js';
+import rolesRoutes from './modules/roles/roles.routes.js';
 import teamsRoutes from './modules/teams/teams.routes.js';
 import attendanceRoutes from './modules/attendance/attendance.routes.js';
 import tasksRoutes from './modules/tasks/tasks.routes.js';
@@ -186,18 +187,18 @@ export function createApp() {
       await db.prepare('SELECT 1').get();
       const migration = await db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as any;
       const tables = await db.prepare(
-        "SELECT COUNT(*) AS count FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('users','departments','attendance','leaves','tasks','holidays')"
+        "SELECT COUNT(*) AS count FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('users','departments','roles','attendance','leaves','tasks','holidays')"
       ).get() as any;
       const version = Number(migration?.version ?? 0);
       const tableCount = Number(tables?.count ?? 0);
-      if (version < 19 || tableCount < 6) {
+      if (version < 20 || tableCount < 7) {
         res.status(503).json({
           status: 'not ready',
           timestamp,
           checks: {
             database: 'ok',
-            schema: version >= 19 ? 'ok' : `migration ${version}/19`,
-            coreTables: `${tableCount}/6`,
+            schema: version >= 20 ? 'ok' : `migration ${version}/20`,
+            coreTables: `${tableCount}/7`,
           },
         });
         return;
@@ -242,6 +243,7 @@ export function createApp() {
   app.use(`${api}/auth`, authRoutes);
   app.use(`${api}/users`, usersRoutes);
   app.use(`${api}/departments`, departmentsRoutes);
+  app.use(`${api}/roles`, rolesRoutes);
   app.use(`${api}/teams`, teamsRoutes);
   app.use(`${api}/attendance`, attendanceRoutes);
   app.use(`${api}/tasks`, tasksRoutes);

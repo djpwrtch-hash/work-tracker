@@ -15,7 +15,7 @@ export default function ReportsPage() {
   const { user, loading } = useAuth();
   const qc = useQueryClient();
   const { pathname } = useLocation();
-  const isAdmin = user?.role === 'director' || user?.role === 'hr';
+  const isAdmin = user?.accessLevel === 'director' || user?.accessLevel === 'hr';
   const { confirm } = useConfirm();
   const [showCreate, setShowCreate] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);

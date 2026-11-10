@@ -113,6 +113,9 @@ export default function UsersPage() {
   const { data: deptsRaw } = useQuery({ queryKey: ['departments'], queryFn: async () => (await api.get('/departments')).data });
   const depts = deptsRaw?.departments ?? deptsRaw ?? [];
 
+  const { data: rolesRaw } = useQuery({ queryKey: ['roles'], queryFn: async () => (await api.get('/roles')).data });
+  const roles: any[] = rolesRaw?.roles ?? rolesRaw ?? [];
+
   const userColumns = useMemo<Column<any>[]>(() => [
     { header: 'Employee', key: 'emp', render: (u: any) => (
       <div className="flex items-center gap-3">
@@ -158,7 +161,7 @@ export default function UsersPage() {
   });
 
   if (loading) return <DashboardLayout><div className="flex items-center justify-center py-16"><div className="h-8 w-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" /></div></DashboardLayout>;
-  if (!user || (user.role !== 'director' && user.role !== 'hr')) {
+  if (!user || (user.accessLevel !== 'director' && user.accessLevel !== 'hr')) {
     return (
       <DashboardLayout>
         <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -188,7 +191,8 @@ export default function UsersPage() {
             <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Search users..." className="w-full rounded-xl border border-slate-700 bg-slate-800 pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:border-violet-500" />
           </div>
           <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white">
-            <option value="">All Roles</option><option value="director">Director</option><option value="hr">HR</option><option value="employee">Employee</option>
+            <option value="">All Roles</option>
+            {roles.map((r: any) => <option key={r.id ?? r.name} value={r.name}>{r.name}</option>)}
           </select>
         </div>
 
@@ -311,7 +315,7 @@ export default function UsersPage() {
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div><label className="block text-sm text-slate-300 mb-1">Role *</label><select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white"><option value="employee">Employee</option><option value="hr">HR</option><option value="director">Director</option></select></div>
+              <div><label className="block text-sm text-slate-300 mb-1">Role *</label><select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white">{roles.map((r: any) => <option key={r.id ?? r.name} value={r.name}>{r.name}</option>)}</select></div>
               <div><label className="block text-sm text-slate-300 mb-1">Department</label><select value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white"><option value="">None</option>{depts.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
             </div>
             <div><label className="block text-sm text-slate-300 mb-1">Designation</label><input value={form.designation} onChange={(e) => setForm({ ...form, designation: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" /></div>
