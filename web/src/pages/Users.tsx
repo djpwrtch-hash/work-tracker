@@ -175,7 +175,7 @@ export default function UsersPage() {
 
   const openReset = (u: any) => {
     setResetTarget(u);
-    setResetPassword(generateTempPassword());
+    setResetPassword('');
     setShowResetPassword(true);
     setResetDone(false);
     setError('');
