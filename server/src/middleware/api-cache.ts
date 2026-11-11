@@ -18,13 +18,17 @@ export function apiCache(options: ApiCacheOptions) {
       const cacheKey = options.key?.(req) || `${user?.sub || 'anon'}:${user?.role || 'none'}:${req.originalUrl}`;
       const cached = await cache.get(cacheKey);
 
+      // Never let the browser cache these per-user payloads: a stale 304 here
+      // hides state changes (pause/resume, check-in) until a manual refresh.
       if (cached !== undefined) {
         res.setHeader('X-Cache', 'HIT');
+        res.setHeader('Cache-Control', 'no-store');
         res.json(cached);
         return;
       }
 
       res.setHeader('X-Cache', 'MISS');
+      res.setHeader('Cache-Control', 'no-store');
       const originalJson = res.json.bind(res);
       res.json = (body: any) => {
         if (res.statusCode < 400) {

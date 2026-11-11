@@ -6,10 +6,10 @@ import { AppError } from '../../lib/app-error.js';
 
 const HALF_DAY_THRESHOLD = 4;
 
-function invalidateAttendanceCache() {
+async function invalidateAttendanceCache(): Promise<void> {
   try {
-    cache.delContaining('/api/v1/attendance/');
-    cache.delContaining('/api/v1/analytics/');
+    await cache.delContaining('/api/v1/attendance/');
+    await cache.delContaining('/api/v1/analytics/');
   } catch (e) {
     console.error('[Attendance] Cache invalidation failed:', e);
   }
@@ -90,7 +90,7 @@ export class AttendanceService {
         }
         const rec = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(existing.id);
         logEvent(existing.id, userId, 'check_in', { latitude: input.latitude, longitude: input.longitude, accuracy: input.accuracy, locationCapturedAt: input.locationCapturedAt }, now);
-        invalidateAttendanceCache();
+        await invalidateAttendanceCache();
         emitAttendanceUpdated(userId, rec);
         return rec;
       }
@@ -111,7 +111,7 @@ export class AttendanceService {
     }
     const rec = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(id);
     logEvent(id, userId, 'check_in', { latitude: input.latitude, longitude: input.longitude, accuracy: input.accuracy, locationCapturedAt: input.locationCapturedAt }, now);
-    invalidateAttendanceCache();
+    await invalidateAttendanceCache();
     emitAttendanceUpdated(userId, rec);
     return rec;
   }
@@ -141,7 +141,7 @@ export class AttendanceService {
     }
     logEvent(rec.id, userId, 'pause_start', input, now);
     const updated = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(rec.id);
-    invalidateAttendanceCache();
+    await invalidateAttendanceCache();
     emitAttendanceUpdated(userId, updated);
     return updated;
   }
@@ -177,7 +177,7 @@ export class AttendanceService {
     }
     logEvent(rec.id, userId, 'pause_end', input, nowIso);
     const updated = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(rec.id);
-    invalidateAttendanceCache();
+    await invalidateAttendanceCache();
     emitAttendanceUpdated(userId, updated);
     return updated;
   }
@@ -227,7 +227,7 @@ export class AttendanceService {
 
     const updated = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(rec.id);
     logEvent(rec.id, userId, 'check_out', input, nowIso);
-    invalidateAttendanceCache();
+    await invalidateAttendanceCache();
     emitAttendanceUpdated(userId, updated);
     return updated;
   }
@@ -343,7 +343,7 @@ export class AttendanceService {
       deleted = result.changes;
     }
     const result = { deleted, scope: { userId: input.userId ?? null, userIds: input.userIds ?? null, status: input.status ?? null, startDate: startDate ?? null, endDate: endDate ?? null, date: normalizedDate } };
-    invalidateAttendanceCache();
+    await invalidateAttendanceCache();
     return result;
   }
 
