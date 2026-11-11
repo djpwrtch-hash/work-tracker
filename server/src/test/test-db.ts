@@ -50,5 +50,10 @@ export function applyTestDbEnv(): TestDbConfig {
   process.env.MYSQL_PASSWORD = cfg.password;
   process.env.MYSQL_DATABASE = cfg.database;
   process.env.NODE_ENV = process.env.NODE_ENV || 'test';
+  // Keep brute-force throttling tests fast and deterministic regardless of the
+  // production default (50). CI can still override this.
+  // global-setup loads server/.env (MAX_LOGIN_ATTEMPTS=50) and forks inherit it, so force
+  // the test value explicitly — the brute-force throttle test needs the 429 path to trigger quickly.
+  process.env.MAX_LOGIN_ATTEMPTS = '5';
   return cfg;
 }

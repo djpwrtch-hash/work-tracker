@@ -369,7 +369,7 @@ pm2 startup
 | `JWT_REFRESH_SECRET` | (auto-generated) | Refresh token signing key |
 | `JWT_ACCESS_TTL` | 15m | Access token expiry |
 | `JWT_REFRESH_TTL_DAYS` | 30 | Refresh token expiry (days) |
-| `MAX_LOGIN_ATTEMPTS` | 5 | Lockout threshold |
+| `MAX_LOGIN_ATTEMPTS` | 50 | Lockout threshold |
 | `LOCKOUT_MINUTES` | 15 | Lockout duration |
 | `ENABLE_HTTPS` | false | Self-signed HTTPS |
 

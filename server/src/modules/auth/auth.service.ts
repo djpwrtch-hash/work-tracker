@@ -20,9 +20,7 @@ const SALT_ROUNDS = 12;
 const MAX_LOGIN_ATTEMPTS = config.maxLoginAttempts;
 const LOCKOUT_MINUTES = config.lockoutMinutes;
 const IP_WINDOW_MS = 15 * 60 * 1000;
-const IP_MAX_ATTEMPTS = 10;
 const EMAIL_WINDOW_MS = 15 * 60 * 1000;
-const EMAIL_MAX_ATTEMPTS = 5;
 const PROGRESSIVE_DELAY_THRESHOLD = 3;
 const PROGRESSIVE_DELAY_MS = 1000;
 const SECURITY_ALERT_THRESHOLD = 3;
@@ -40,7 +38,7 @@ export class AuthService {
     // Rate limit by IP (fixed 15-minute window, stored in MySQL)
     const ipKey = ip ?? 'unknown';
     const ipResult = await ipLimiter.increment(ipKey);
-    if (ipResult.totalHits > IP_MAX_ATTEMPTS) {
+    if (ipResult.totalHits > MAX_LOGIN_ATTEMPTS) {
       const retryAfterMs = Math.max(0, (ipResult.resetTime?.getTime() ?? Date.now()) - Date.now());
       throw new AppError(429, `Too many login attempts from this IP. Retry after ${Math.ceil(retryAfterMs / 1000)} seconds`);
     }
@@ -48,7 +46,7 @@ export class AuthService {
     // Rate limit by email (fixed 15-minute window, stored in MySQL)
     const emailKey = email;
     const emailResult = await emailLimiter.increment(emailKey);
-    if (emailResult.totalHits > EMAIL_MAX_ATTEMPTS) {
+    if (emailResult.totalHits > MAX_LOGIN_ATTEMPTS) {
       const retryAfterMs = Math.max(0, (emailResult.resetTime?.getTime() ?? Date.now()) - Date.now());
       throw new AppError(429, `Too many login attempts for this account. Retry after ${Math.ceil(retryAfterMs / 1000)} seconds`);
     }

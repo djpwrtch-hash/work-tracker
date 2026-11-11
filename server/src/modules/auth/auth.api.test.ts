@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { app, createUser, loginAs, authHeader } from '../../test/helpers.js';
+import db from '../../db/index.js';
 
 describe('POST /api/v1/auth/login', () => {
   it('logs in with valid credentials and returns an access token', async () => {
@@ -43,6 +44,8 @@ describe('POST /api/v1/auth/login', () => {
       if (lastStatus === 429) break;
     }
     expect(lastStatus).toBe(429);
+    // Reset the DB-backed login limiters so later tests in this file can log in without 429s.
+    await db.prepare("DELETE FROM rate_limits WHERE `key` LIKE 'login:%'").run();
   }, 60000);
 });
 

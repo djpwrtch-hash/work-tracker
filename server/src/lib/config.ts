@@ -35,7 +35,7 @@ export const config = {
   jwtRefreshSecret: env('JWT_REFRESH_SECRET', 'dev-refresh-secret-change-in-production'),
   jwtAccessTtl: env('JWT_ACCESS_TTL', '15m'),
   jwtRefreshTtlDays: Number(env('JWT_REFRESH_TTL_DAYS', '30')),
-  maxLoginAttempts: Number(env('MAX_LOGIN_ATTEMPTS', '5')),
+  maxLoginAttempts: Number(env('MAX_LOGIN_ATTEMPTS', '50')),
   lockoutMinutes: Number(env('LOCKOUT_MINUTES', '15')),
   uploadDir: env('UPLOAD_DIR', 'uploads'),
   // MySQL database configuration
