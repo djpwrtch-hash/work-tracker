@@ -184,6 +184,11 @@ export default function AttendancePage() {
   });
 
   const displayStatus = pendingPause ?? today?.status;
+  // Authoritative "is paused" signal: a pause row exists and has not been closed.
+  // Falling back to status keeps this correct during the brief optimistic window.
+  const isPaused = pendingPause === 'on_break'
+    || displayStatus === 'on_break'
+    || !!(today?.pause_start_time && !today?.pause_end_time);
 
   const { data: todayEvents } = useQuery({
     queryKey: ['todayEvents', today?.id],
@@ -634,7 +639,7 @@ export default function AttendancePage() {
             </div>
             {/* Action Buttons */}
             <div className="flex gap-2 flex-wrap">
-              {!today.logout_time && displayStatus === 'present' && (
+              {!today.logout_time && displayStatus === 'present' && !isPaused && (
                 <>
                   <button onClick={() => handleStartPause()} disabled={startPause.isPending || endPause.isPending || gettingLocation}
                     className="flex items-center gap-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 text-sm font-semibold transition disabled:opacity-50">
@@ -649,7 +654,7 @@ export default function AttendancePage() {
               {locationError && !today.logout_time && (
                 <p className="w-full mt-1 text-xs text-amber-400/80">{locationError}</p>
               )}
-              {!today.logout_time && displayStatus === 'on_break' && (
+              {!today.logout_time && isPaused && (
                 <button onClick={() => handleEndPause()} disabled={endPause.isPending || startPause.isPending || gettingLocation}
                   className="flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 text-sm font-semibold transition disabled:opacity-50">
                   {endPause.isPending || gettingLocation ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}{gettingLocation ? (locationProgress !== null ? `Improving accuracy… ${locationProgress}m` : 'Getting location…') : 'Resume'}

@@ -135,7 +135,7 @@ export class AttendanceService {
     const now = new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
     const hasLocation = input?.latitude !== undefined && input?.longitude !== undefined;
     if (hasLocation) {
-      await db.prepare("UPDATE attendance SET pause_start_time = ?, pause_end_time = NULL, status = 'on_break', latitude = ?, longitude = ?, location_accuracy = ?, location_captured_at = ?, updated_at = ? WHERE id = ?").run(now, now, input!.latitude, input!.longitude, input!.accuracy ?? null, input!.locationCapturedAt ?? now, now, rec.id);
+      await db.prepare("UPDATE attendance SET pause_start_time = ?, pause_end_time = NULL, status = 'on_break', latitude = ?, longitude = ?, location_accuracy = ?, location_captured_at = ?, updated_at = ? WHERE id = ?").run(now, input!.latitude, input!.longitude, input!.accuracy ?? null, input!.locationCapturedAt ?? now, now, rec.id);
     } else {
       await db.prepare("UPDATE attendance SET pause_start_time = ?, pause_end_time = NULL, status = 'on_break', updated_at = ? WHERE id = ?").run(now, now, rec.id);
     }

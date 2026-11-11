@@ -68,3 +68,45 @@ describe('POST /api/v1/attendance/check-out', () => {
     expect([400, 404, 409]).toContain(res.status);
   });
 });
+
+describe('POST /api/v1/attendance/pause-start and /pause-end', () => {
+  it('pauses and resumes with location without server errors', async () => {
+    const user = await createUser({ password: 'Password123!' });
+    const { token } = await loginAs(user.email, 'Password123!');
+    await request(app).post('/api/v1/attendance/check-in').set(authHeader(token)).send({ status: 'present' });
+
+    const paused = await request(app).post('/api/v1/attendance/pause-start').set(authHeader(token)).send({ ...LOC });
+    expect(paused.status).toBe(200);
+    expect(paused.body.status).toBe('on_break');
+    expect(paused.body.pause_start_time ?? paused.body.pauseStartTime).toBeTruthy();
+    expect(paused.body.pause_end_time ?? paused.body.pauseEndTime ?? null).toBeNull();
+
+    const today = await request(app).get('/api/v1/attendance/today').set(authHeader(token));
+    expect(today.body.status).toBe('on_break');
+
+    const resumed = await request(app).post('/api/v1/attendance/pause-end').set(authHeader(token)).send({ ...LOC });
+    expect(resumed.status).toBe(200);
+    expect(resumed.body.status).toBe('present');
+    expect(Number(resumed.body.pause_minutes)).toBeGreaterThanOrEqual(0);
+
+    const after = await request(app).get('/api/v1/attendance/today').set(authHeader(token));
+    expect(after.body.status).toBe('present');
+  });
+
+  it('rejects pause without checking in first', async () => {
+    const user = await createUser({ password: 'Password123!' });
+    const { token } = await loginAs(user.email, 'Password123!');
+    const res = await request(app).post('/api/v1/attendance/pause-start').set(authHeader(token)).send({ ...LOC });
+    expect(res.status).toBe(404);
+  });
+
+  it('resuming without an active pause is a no-op', async () => {
+    const user = await createUser({ password: 'Password123!' });
+    const { token } = await loginAs(user.email, 'Password123!');
+    await request(app).post('/api/v1/attendance/check-in').set(authHeader(token)).send({ status: 'present' });
+
+    const res = await request(app).post('/api/v1/attendance/pause-end').set(authHeader(token)).send({ ...LOC });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('present');
+  });
+});
