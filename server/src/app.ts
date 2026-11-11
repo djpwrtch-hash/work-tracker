@@ -125,6 +125,15 @@ export function createApp() {
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self), interest-cohort=()');
     next();
   });
+
+  // API responses are per-user and time-sensitive (attendance, leaves, ...).
+  // Disable Express ETag so conditional requests cannot return 304, and forbid
+  // browser caching so state changes (pause/check-in/role changes) are visible immediately.
+  app.set('etag', false);
+  app.use('/api', (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
   app.use(compressMiddleware());
   app.use(cors({
     origin: config.corsOrigin,

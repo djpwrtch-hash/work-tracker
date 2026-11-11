@@ -2,7 +2,6 @@ import { Router, Request, Response } from 'express';
 import { validate, requireUuid } from '../../middleware/validate.js';
 import { authenticate } from '../../middleware/authenticate.js';
 import { requireRole } from '../../middleware/rbac.js';
-import { apiCache } from '../../middleware/api-cache.js';
 import { checkInSchema, listAttendanceSchema, updateAttendanceSchema, monthlyQuerySchema, deleteAttendanceSchema, locationOptionalSchema } from './attendance.schema.js';
 import { AttendanceService, getAttendanceEvents, getAttendanceEventsForUser, getPauseLog } from './attendance.service.js';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service.js';
@@ -66,14 +65,14 @@ router.get('/pause-log', requireRole('director', 'hr'), async (req: Request, res
   } catch (err) { next(err); }
 });
 
-router.get('/today', apiCache({ ttl: 30_000 }), async (req: Request, res: Response, next) => {
+router.get('/today', async (req: Request, res: Response, next) => {
   try {
     const record = await AttendanceService.getTodayStatus(req.user!.sub);
     res.json(record);
   } catch (err) { next(err); }
 });
 
-router.get('/today-all', requireRole('director', 'hr'), apiCache({ ttl: 30_000 }), async (req: Request, res: Response, next) => {
+router.get('/today-all', requireRole('director', 'hr'), async (req: Request, res: Response, next) => {
   try {
     const records = await AttendanceService.getTodayAll();
     res.json(records);
@@ -91,7 +90,7 @@ router.get('/history/:userId', requireRole('director', 'hr'), requireUuid('userI
   } catch (err) { next(err); }
 });
 
-router.get('/monthly', apiCache({ ttl: 60_000 }), validate(monthlyQuerySchema, 'query'), async (req: Request, res: Response, next) => {
+router.get('/monthly', validate(monthlyQuerySchema, 'query'), async (req: Request, res: Response, next) => {
   try {
     const q = req.query as any;
     const targetUserId = (req.user!.accessLevel === 'director' || req.user!.accessLevel === 'hr') && q.userId ? q.userId : req.user!.sub;
