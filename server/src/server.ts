@@ -6,8 +6,6 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { registerShutdown } from './lib/shutdown.js';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-
 async function startRealApp(): Promise<express.Express> {
   const { createApp } = await import('./app.js');
   return createApp();
@@ -69,7 +67,7 @@ async function main() {
   const enableHttps = process.env.ENABLE_HTTPS === 'true';
   let server: http.Server | https.Server;
   if (enableHttps) {
-    const certDir = path.join(here, 'certs');
+    const certDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'certs');
     const keyPath = path.join(certDir, 'key.pem');
     const certPath = path.join(certDir, 'cert.pem');
     if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
