@@ -97,6 +97,66 @@ describe('DELETE /api/v1/users/:id', () => {
   });
 });
 
+describe('POST /api/v1/users/:id/reset-password', () => {
+  const NEW_PASSWORD = 'ResetPass123!x';
+
+  it('lets a director reset an employee password and sets must_change_password', async () => {
+    const director = await createUser({ role: 'director', password: 'Password123!' });
+    const victim = await createUser({ password: 'Password123!' });
+    const { token } = await loginAs(director.email, 'Password123!');
+
+    const res = await request(app)
+      .post(`/api/v1/users/${victim.id}/reset-password`)
+      .set(authHeader(token))
+      .send({ newPassword: NEW_PASSWORD });
+    expect(res.status).toBe(200);
+
+    // Old password no longer works, new one does, and the account is flagged to change on next login.
+    const oldLogin = await request(app).post('/api/v1/auth/login').send({ email: victim.email, password: 'Password123!' });
+    expect(oldLogin.status).toBe(401);
+    const row = await db.prepare('SELECT must_change_password FROM users WHERE id = ?').get(victim.id) as any;
+    expect(Number(row.must_change_password)).toBe(1);
+  });
+
+  it('lets HR reset an employee password but not a director password', async () => {
+    const hr = await createUser({ role: 'hr', password: 'Password123!' });
+    const employee = await createUser({ password: 'Password123!' });
+    const director = await createUser({ role: 'director', password: 'Password123!' });
+    const { token } = await loginAs(hr.email, 'Password123!');
+
+    const ok = await request(app)
+      .post(`/api/v1/users/${employee.id}/reset-password`)
+      .set(authHeader(token))
+      .send({ newPassword: NEW_PASSWORD });
+    expect(ok.status).toBe(200);
+
+    const forbidden = await request(app)
+      .post(`/api/v1/users/${director.id}/reset-password`)
+      .set(authHeader(token))
+      .send({ newPassword: NEW_PASSWORD });
+    expect(forbidden.status).toBe(403);
+  });
+
+  it('rejects employees with 403 and weak passwords with 400', async () => {
+    const employee = await createUser({ password: 'Password123!' });
+    const victim = await createUser({ password: 'Password123!' });
+    const { token } = await loginAs(employee.email, 'Password123!');
+
+    const forbidden = await request(app)
+      .post(`/api/v1/users/${victim.id}/reset-password`)
+      .set(authHeader(token))
+      .send({ newPassword: NEW_PASSWORD });
+    expect(forbidden.status).toBe(403);
+
+    const { token: directorToken } = await loginAs((await createUser({ role: 'director', password: 'Password123!' })).email, 'Password123!');
+    const weak = await request(app)
+      .post(`/api/v1/users/${victim.id}/reset-password`)
+      .set(authHeader(directorToken))
+      .send({ newPassword: 'weak' });
+    expect(weak.status).toBe(400);
+  });
+});
+
 describe('DELETE /api/v1/teams/:teamName validation', () => {
   it('rejects oversized team names with 400', async () => {
     const director = await createUser({ role: 'director', password: 'Password123!' });

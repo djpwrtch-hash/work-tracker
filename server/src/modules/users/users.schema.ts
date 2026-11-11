@@ -61,7 +61,12 @@ export const deleteUserSchema = z.object({
   confirm: z.enum(['DELETE']).optional(),
 });
 
+export const resetPasswordSchema = z.object({
+  newPassword: z.string().trim().min(12, 'Password must be at least 12 characters').max(128, 'Password too long').regex(/[A-Z]/, 'Password must contain at least one uppercase letter').regex(/[a-z]/, 'Password must contain at least one lowercase letter').regex(/[0-9]/, 'Password must contain at least one number').regex(/[^A-Za-z0-9]/, 'Password must contain at least one special character'),
+});
+
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 export type ListUsersInput = z.infer<typeof listUsersSchema>;
 export type DeleteUserInput = z.infer<typeof deleteUserSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;

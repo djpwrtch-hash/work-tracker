@@ -57,7 +57,7 @@ export class AuthService {
       await new Promise(resolve => setTimeout(resolve, delayMs));
     }
 
-    const user = await db.prepare('SELECT id, email, password_hash, role, status, employee_id, first_name, last_name, designation, department_id, phone_number, joining_date, profile_picture_url, failed_login_attempts, locked_until, two_factor_enabled, two_factor_secret FROM users WHERE email = ?').get(email) as any;
+    const user = await db.prepare('SELECT id, email, password_hash, role, status, employee_id, first_name, last_name, designation, department_id, phone_number, joining_date, profile_picture_url, failed_login_attempts, locked_until, two_factor_enabled, two_factor_secret, must_change_password FROM users WHERE email = ?').get(email) as any;
     if (!user) throw new AppError(401, 'Invalid credentials');
     if (user.status !== 'active') throw new AppError(401, 'Invalid credentials');
     user.access_level = await getRoleAccessLevel(user.role);
@@ -144,6 +144,7 @@ export class AuthService {
       departmentId: user.department_id, designation: user.designation,
       status: user.status, phoneNumber: user.phone_number, joiningDate: user.joining_date,
       profilePictureUrl: user.profile_picture_url, twoFactorEnabled: !!user.two_factor_enabled,
+      mustChangePassword: !!user.must_change_password,
     };
   }
 
@@ -293,7 +294,7 @@ await db.prepare("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ?
     }
 
     await db.transaction(async () => {
-      await db.prepare("UPDATE users SET password_hash = ?, failed_login_attempts = 0, locked_until = NULL, updated_at = NOW() WHERE id = ?").run(newHash, userId);
+      await db.prepare("UPDATE users SET password_hash = ?, failed_login_attempts = 0, locked_until = NULL, must_change_password = 0, updated_at = NOW() WHERE id = ?").run(newHash, userId);
       await recordPassword(userId, newHash);
       await revokeUserTokens(userId);
       await db.prepare("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ?").run(userId);
@@ -301,14 +302,14 @@ await db.prepare("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ?
   }
 
   static async getMe(userId: string) {
-    const user = await db.prepare('SELECT id, employee_id, first_name, last_name, email, role, department_id, designation, joining_date, status, phone_number, profile_picture_url, two_factor_enabled FROM users WHERE id = ?').get(userId) as any;
+    const user = await db.prepare('SELECT id, employee_id, first_name, last_name, email, role, department_id, designation, joining_date, status, phone_number, profile_picture_url, two_factor_enabled, must_change_password FROM users WHERE id = ?').get(userId) as any;
     if (!user) throw new AppError(404, 'User not found');
     return {
       id: user.id, employeeId: user.employee_id, firstName: user.first_name, lastName: user.last_name,
       email: user.email, role: user.role, accessLevel: await getRoleAccessLevel(user.role),
       departmentId: user.department_id, designation: user.designation,
       joiningDate: user.joining_date, status: user.status, phoneNumber: user.phone_number, profilePictureUrl: user.profile_picture_url,
-      twoFactorEnabled: !!user.two_factor_enabled,
+      twoFactorEnabled: !!user.two_factor_enabled, mustChangePassword: !!user.must_change_password,
     };
   }
 

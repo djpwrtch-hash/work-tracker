@@ -536,6 +536,13 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       }
     },
   },
+  {
+    version: 21,
+    name: 'must-change-password',
+    up: async () => {
+      await addColumnIfMissing('users', 'must_change_password', 'must_change_password TINYINT NOT NULL DEFAULT 0');
+    },
+  },
 ];
 
 await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (

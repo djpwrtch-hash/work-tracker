@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS users (
   address_pincode VARCHAR(6),
   status VARCHAR(20) NOT NULL DEFAULT 'active',
   role VARCHAR(50) NOT NULL DEFAULT 'employee',
+  must_change_password TINYINT NOT NULL DEFAULT 0,
   department_id VARCHAR(36),
   failed_login_attempts INT NOT NULL DEFAULT 0,
   locked_until DATETIME,

@@ -19,6 +19,7 @@ interface User {
   profilePictureUrl?: string;
   joiningDate?: string;
   twoFactorEnabled?: boolean;
+  mustChangePassword?: boolean;
 }
 
 interface AuthCtx {

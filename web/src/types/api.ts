@@ -21,6 +21,7 @@ export interface User {
   addressState: string | null;
   addressPincode: string | null;
   profilePictureUrl: string | null;
+  mustChangePassword?: boolean;
 }
 
 export interface UserWithPassword extends User {

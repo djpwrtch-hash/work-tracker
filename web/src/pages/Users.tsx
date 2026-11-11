@@ -5,7 +5,7 @@ import { api, getApiError } from '@/lib/api';
 import { apiEndpoints } from '@/lib/api-endpoints';
 import { statusColor, displayRole } from '@/lib/utils';
 import { useState, useEffect, useMemo } from 'react';
-import { Plus, Loader2, Search, Pencil, Trash2, Download } from 'lucide-react';
+import { Plus, Loader2, Search, Pencil, Trash2, Download, KeyRound, Copy, Eye, EyeOff } from 'lucide-react';
 import { dynamic } from '@/lib/dynamic';
 import type { ExportColumn } from '@/components/ExportDialog';
 import { useConfirm } from '@/components/ConfirmDialog';
@@ -29,6 +29,10 @@ export default function UsersPage() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [showExport, setShowExport] = useState(false);
   const [error, setError] = useState('');
+  const [resetTarget, setResetTarget] = useState<any | null>(null);
+  const [resetPassword, setResetPassword] = useState('');
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [resetDone, setResetDone] = useState(false);
 
   const { data: policyData } = useQuery({
     queryKey: ['security', 'policy'],
@@ -160,6 +164,33 @@ export default function UsersPage() {
     onSettled: () => qc.invalidateQueries({ queryKey: ['users'] }),
   });
 
+  const generateTempPassword = (): string => {
+    const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const lower = 'abcdefghjkmnpqrstuvwxyz';
+    const digits = '23456789';
+    const symbols = '!@#$%&*';
+    const pick = (pool: string, n: number) => Array.from({ length: n }, () => pool[Math.floor(Math.random() * pool.length)]).join('');
+    return (pick(upper, 2) + pick(lower, 4) + pick(digits, 3) + pick(symbols, 2) + pick(upper + lower + digits, 3)).split('').sort(() => Math.random() - 0.5).join('');
+  };
+
+  const openReset = (u: any) => {
+    setResetTarget(u);
+    setResetPassword(generateTempPassword());
+    setShowResetPassword(true);
+    setResetDone(false);
+    setError('');
+  };
+
+  const resetPasswordMutation = useMutation({
+    mutationFn: async ({ id, newPassword }: { id: string; newPassword: string }) => (await api.post(`/users/${id}/reset-password`, { newPassword })).data,
+    onSuccess: () => { setResetDone(true); qc.invalidateQueries({ queryKey: ['users'] }); toast.success('Password reset. Share it securely — it will not be shown again.'); },
+    onError: (e) => { setError(getApiError(e, 'Failed to reset password')); toast.error(getApiError(e, 'Failed to reset password')); },
+  });
+
+  const copyResetPassword = () => {
+    void navigator.clipboard?.writeText(resetPassword).then(() => toast.success('Copied to clipboard')).catch(() => toast.error('Could not copy'));
+  };
+
   if (loading) return <DashboardLayout><div className="flex items-center justify-center py-16"><div className="h-8 w-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" /></div></DashboardLayout>;
   if (!user || (user.accessLevel !== 'director' && user.accessLevel !== 'hr')) {
     return (
@@ -203,6 +234,7 @@ export default function UsersPage() {
           empty={<p className="text-sm text-slate-500">No users</p>}
           actions={(u: any) => (
             <>
+              <button onClick={() => openReset(u)} title="Reset password" className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-amber-400 transition"><KeyRound className="h-4 w-4" /></button>
               <button onClick={() => { setEditId(u.id); setForm({ email: u.email, password: '', firstName: u.firstName, lastName: u.lastName, role: u.role, departmentId: u.departmentId || '', designation: u.designation || '', phoneNumber: u.phoneNumber || '', dob: u.dob ? u.dob.split('T')[0] : '', gender: u.gender || 'male', fatherName: u.fatherName || '', nationality: u.nationality || '', qualification: u.qualification || '', addressStreet: u.addressStreet || '', addressCity: u.addressCity || '', addressState: u.addressState || '', addressPincode: u.addressPincode || '', joiningDate: u.joiningDate ? u.joiningDate.split('T')[0] : '' }); setShowCreate(true); setFormErrors({}); }} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition"><Pencil className="h-4 w-4" /></button>
               <button onClick={async () => { if (await confirm({ title: 'Delete User', message: 'This action cannot be undone. Are you sure you want to delete this user?', variant: 'danger', confirmText: 'Delete' })) deleteUser.mutate(u.id); }} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-rose-400 transition"><Trash2 className="h-4 w-4" /></button>
             </>
@@ -324,6 +356,48 @@ export default function UsersPage() {
               {createUser.isPending && <Loader2 className="h-4 w-4 animate-spin" />}{editId ? 'Update' : 'Create'}
             </button>
           </div>
+        </Modal>
+
+        <Modal
+          open={!!resetTarget}
+          onClose={() => { setResetTarget(null); setResetDone(false); setError(''); }}
+          title="Reset Password"
+        >
+          {error && <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm rounded-xl px-4 py-3 mb-4">{error}</div>}
+          {resetDone ? (
+            <div className="space-y-4">
+              <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm rounded-xl px-4 py-3">Password has been reset. The user must change it on next login.</div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">New password (share securely)</label>
+                <div className="flex items-center gap-2">
+                  <input readOnly value={resetPassword} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white font-mono" />
+                  <button onClick={copyResetPassword} className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition border border-slate-700"><Copy className="h-4 w-4" /></button>
+                </div>
+                <p className="text-[10px] text-slate-600 mt-1">This is shown once. Share it with the user through a secure channel, never over email/chat if possible.</p>
+              </div>
+              <button onClick={() => { setResetTarget(null); setResetDone(false); setError(''); }} className="w-full rounded-xl bg-violet-600 hover:bg-violet-700 text-white py-2.5 text-sm font-semibold transition">Done</button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-sm text-slate-300">Reset password for <span className="text-white font-medium">{resetTarget?.firstName} {resetTarget?.lastName}</span> ({resetTarget?.email})</p>
+              <p className="text-xs text-slate-500">The user will be asked to choose a new password on first login. Director reset is allowed for any account; HR cannot reset director-level accounts.</p>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">New password *</label>
+                <div className="flex items-center gap-2">
+                  <input type={showResetPassword ? 'text' : 'password'} value={resetPassword} onChange={(e) => setResetPassword(e.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white font-mono" />
+                  <button onClick={() => setShowResetPassword((v) => !v)} className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition border border-slate-700">{showResetPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>
+                  <button onClick={copyResetPassword} className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition border border-slate-700"><Copy className="h-4 w-4" /></button>
+                </div>
+                <button onClick={() => setResetPassword(generateTempPassword())} className="mt-2 text-xs text-violet-400 hover:text-violet-300 font-medium">Generate random password</button>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => { setResetTarget(null); setResetDone(false); setError(''); }} className="flex-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 py-2.5 text-sm font-medium transition border border-slate-700">Cancel</button>
+                <button onClick={() => resetTarget && resetPasswordMutation.mutate({ id: resetTarget.id, newPassword: resetPassword })} disabled={resetPasswordMutation.isPending || !resetPassword} className="flex-1 rounded-xl bg-violet-600 hover:bg-violet-700 text-white py-2.5 text-sm font-semibold transition disabled:opacity-50 flex items-center justify-center gap-2">
+                  {resetPasswordMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}Reset
+                </button>
+              </div>
+            </div>
+          )}
         </Modal>
       </div>
     </DashboardLayout>

@@ -9,7 +9,7 @@ A production-grade full-stack workforce management application for small to medi
 | Layer | Technology |
 |-------|-----------|
 | **Backend** | Node.js 22+, Express 4.x, TypeScript, mysql2 (MySQL) |
-| **Database** | MySQL 8.0 via `mysql2/promise`. `server/src/db/schema.sql` is the source of truth (migrations 1-20 are idempotent). |
+| **Database** | MySQL 8.0 via `mysql2/promise`. `server/src/db/schema.sql` is the source of truth (migrations 1-21 are idempotent). |
 | **Deployment** | Docker (localhost) / PM2 |
 
 ## Quick Start (localhost)
@@ -113,6 +113,7 @@ employee-work-tracker/
 | **Roles** | Role master (director/HR only). Custom roles inherit one access level (`director`, `hr`, `employee`); system roles are protected. |
 | **Teams** | Team management with member add/remove, leader designation |
 | **Users** | Full CRUD with role-based access, employee ID generation |
+| **Password reset** | Director/HR can reset any password (HR blocked from director-level accounts); new password is shown once to the admin and the account is forced to change it on next login |
 | **Holidays** | Company-wide and per-user holiday assignment |
 | **Notifications** | Real-time via Socket.IO, mark-read, bulk operations |
 | **Activity Logs** | Complete audit trail for all entity changes |
@@ -274,7 +275,7 @@ The Dockerfile builds the API and `web/dist`, then serves both from one origin, 
 installs `mysql-client` for backups.
 
 1. Create a Railway project and add a **MySQL** service. Use a **fresh/empty database**;
-   the app creates `schema.sql` and applies migrations 1-20 on first boot.
+   the app creates `schema.sql` and applies migrations 1-21 on first boot.
    Do **not** point `DATABASE_URL` at a copy of an older/newer database (for example a
    local `hr` that already has multi-tenant `org_id` columns or migration 19 from
    another branch) — that schema is not compatible with this code.
@@ -317,7 +318,7 @@ installs `mysql-client` for backups.
    dates and scheduled jobs.
 
 Migrations run automatically on startup. The app is not marked ready until
-`schema_migrations` reaches version 20 and the core tables (including `roles`) exist, so a failed
+`schema_migrations` reaches version 21 and the core tables (including `roles`) exist, so a failed
 migration fails the Railway healthcheck instead of serving broken requests.
 
 Production email and backups are configuration-gated:

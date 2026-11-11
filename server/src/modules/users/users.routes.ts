@@ -4,7 +4,7 @@ import { authenticate } from '../../middleware/authenticate.js';
 import { requireRole } from '../../middleware/rbac.js';
 import { apiCache } from '../../middleware/api-cache.js';
 import { cache } from '../../lib/cache.js';
-import { createUserSchema, deleteUserSchema, updateUserSchema, listUsersSchema } from './users.schema.js';
+import { createUserSchema, deleteUserSchema, updateUserSchema, listUsersSchema, resetPasswordSchema } from './users.schema.js';
 import { UsersService } from './users.service.js';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service.js';
 
@@ -48,6 +48,15 @@ router.patch('/:id', requireRole('director', 'hr'), requireUuid('id'), validate(
     cache.delContaining('/api/v1/users');
     try { await ActivityLogsService.create(req.user!.sub, 'update', 'user', req.params.id, { changes: Object.keys(req.body) }, req.ip); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     res.json(user);
+  } catch (err) { next(err); }
+});
+
+router.post('/:id/reset-password', requireRole('director', 'hr'), requireUuid('id'), validate(resetPasswordSchema), async (req: Request, res: Response, next) => {
+  try {
+    const result = await UsersService.resetPassword(req.params.id!, req.body.newPassword, req.user!.accessLevel);
+    cache.delContaining('/api/v1/users');
+    try { await ActivityLogsService.create(req.user!.sub, 'reset_password', 'user', req.params.id, { forcedPasswordChange: true }, req.ip); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
+    res.json(result);
   } catch (err) { next(err); }
 });
 

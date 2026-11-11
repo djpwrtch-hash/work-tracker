@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getInitials, displayRole } from '../lib/utils';
+import ForcePasswordChange from './ForcePasswordChange';
 import NotificationBell from './NotificationBell';
 import {
   LayoutDashboard, CalendarCheck, ClipboardList, FileText, CalendarDays,
@@ -63,6 +64,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = prevOverflow; };
   }, [mobileOpen]);
+
+  // Expired/first-login password: block the app until the user sets a new one.
+  if (user?.mustChangePassword) {
+    return (
+      <div className="h-full min-h-screen flex flex-col bg-slate-950 text-slate-100">
+        <main className="flex-1 overflow-y-auto p-4 md:p-6 safe-bottom">
+          <div className="max-w-7xl mx-auto"><ForcePasswordChange /></div>
+        </main>
+      </div>
+    );
+  }
+
   const isAdmin = user?.accessLevel === 'director';
   const isHr = user?.accessLevel === 'hr';
   const isAdminOrHr = isAdmin || isHr;

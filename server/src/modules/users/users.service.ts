@@ -5,8 +5,9 @@ import { bcryptBreaker } from '../../lib/circuit-breaker.js';
 import { generateEmployeeId } from '../../lib/employee-id.js';
 import { invalidateUserCache } from '../../middleware/authenticate.js';
 import type { CreateUserInput, UpdateUserInput, ListUsersInput } from './users.schema.js';
-import { getPasswordPolicy, validatePassword } from '../../lib/password-policy.js';
+import { getPasswordPolicy, validatePassword, checkPasswordHistory, recordPassword } from '../../lib/password-policy.js';
 import { roleExists } from '../../lib/roles.js';
+import { revokeUserTokens } from '../../lib/blacklist.js';
 
 const SALT_ROUNDS = 12;
 
@@ -28,6 +29,7 @@ function mapUser(u: any) {
     addressState: u.address_state, addressPincode: u.address_pincode,
     profilePictureUrl: u.profile_picture_url,
     twoFactorEnabled: !!u.two_factor_enabled, lastLoginAt: u.last_login_at,
+    mustChangePassword: !!u.must_change_password,
     createdAt: u.created_at, updatedAt: u.updated_at,
   };
 }
@@ -50,12 +52,12 @@ export class UsersService {
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const count = (await db.prepare(`SELECT count(*) as c FROM users ${where}`).get(...params) as any).c;
-    const rows = await db.prepare(`SELECT id, employee_id, first_name, last_name, email, role, designation, department_id, status, phone_number, joining_date, dob, gender, father_name, nationality, qualification, address_street, address_city, address_state, address_pincode, profile_picture_url, two_factor_enabled, last_login_at, created_at, updated_at FROM users ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+    const rows = await db.prepare(`SELECT id, employee_id, first_name, last_name, email, role, designation, department_id, status, phone_number, joining_date, dob, gender, father_name, nationality, qualification, address_street, address_city, address_state, address_pincode, profile_picture_url, two_factor_enabled, must_change_password, last_login_at, created_at, updated_at FROM users ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
     return { users: rows.map(mapUser), total: count, page, limit };
   }
 
   static async getById(id: string) {
-    const u = await db.prepare('SELECT id, employee_id, first_name, last_name, email, role, status, department_id, designation, phone_number, joining_date, dob, gender, father_name, nationality, qualification, address_street, address_city, address_state, address_pincode, profile_picture_url, two_factor_enabled, last_login_at, created_at, updated_at FROM users WHERE id = ?').get(id) as any;
+    const u = await db.prepare('SELECT id, employee_id, first_name, last_name, email, role, status, department_id, designation, phone_number, joining_date, dob, gender, father_name, nationality, qualification, address_street, address_city, address_state, address_pincode, profile_picture_url, two_factor_enabled, must_change_password, last_login_at, created_at, updated_at FROM users WHERE id = ?').get(id) as any;
     if (!u) throw new AppError(404, 'User not found');
     return mapUser(u);
   }
@@ -141,6 +143,47 @@ export class UsersService {
     await db.prepare('DELETE FROM users WHERE id = ?').run(id);
     invalidateUserCache(id);
     return { message: 'User deleted' };
+  }
+
+  /**
+   * Admin/HR-initiated password reset. Does not require the target's current password.
+   * HR may not reset the password of a director-access-level account; directors may reset anyone.
+   * The account is flagged to force a password change on next login.
+   */
+  static async resetPassword(id: string, newPassword: string, requesterAccessLevel?: string) {
+    const target = await db.prepare(
+      `SELECT u.id, u.role, COALESCE(r.access_level, 'employee') AS access_level
+       FROM users u
+       LEFT JOIN roles r ON r.name = u.role
+       WHERE u.id = ?`
+    ).get(id) as any;
+    if (!target) throw new AppError(404, 'User not found');
+
+    // HR cannot reset director-access-level accounts (privilege escalation).
+    if (requesterAccessLevel !== 'director' && target.access_level === 'director') {
+      throw new AppError(403, 'Only a director can reset a director-level account password');
+    }
+
+    const policy = await getPasswordPolicy();
+    const { valid, errors } = await validatePassword(newPassword, policy);
+    if (!valid) throw new AppError(400, `Password does not meet policy: ${errors.join('; ')}`);
+
+    const historyValid = await checkPasswordHistory(id, newPassword, policy);
+    if (!historyValid) throw new AppError(400, `Password cannot be one of the last ${policy.historyCount} passwords`);
+
+    const newHash = await bcryptBreaker.call(() => bcrypt.hash(newPassword, SALT_ROUNDS));
+
+    await db.transaction(async () => {
+      await db.prepare(
+        `UPDATE users SET password_hash = ?, failed_login_attempts = 0, locked_until = NULL, must_change_password = 1, updated_at = NOW() WHERE id = ?`
+      ).run(newHash, id);
+      await recordPassword(id, newHash);
+      await revokeUserTokens(id);
+      await db.prepare("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ?").run(id);
+    })();
+
+    invalidateUserCache(id);
+    return { message: 'Password reset successfully' };
   }
 
   static async getStats() {
