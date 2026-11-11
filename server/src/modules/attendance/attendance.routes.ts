@@ -25,16 +25,16 @@ router.post('/check-out', validate(locationOptionalSchema), async (req: Request,
   } catch (err) { next(err); }
 });
 
-router.post('/pause-start', validate(locationOptionalSchema), async (req: Request, res: Response, next) => {
+router.post('/pause-start', async (req: Request, res: Response, next) => {
   try {
-    const record = await AttendanceService.startPause(req.user!.sub, req.body);
+    const record = await AttendanceService.startPause(req.user!.sub);
     res.json(record);
   } catch (err) { next(err); }
 });
 
-router.post('/pause-end', validate(locationOptionalSchema), async (req: Request, res: Response, next) => {
+router.post('/pause-end', async (req: Request, res: Response, next) => {
   try {
-    const record = await AttendanceService.endPause(req.user!.sub, req.body);
+    const record = await AttendanceService.endPause(req.user!.sub);
     res.json(record);
   } catch (err) { next(err); }
 });

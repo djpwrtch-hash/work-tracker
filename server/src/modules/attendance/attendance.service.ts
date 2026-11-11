@@ -116,7 +116,7 @@ export class AttendanceService {
     return rec;
   }
 
-  static async startPause(userId: string, input?: { latitude?: number; longitude?: number; accuracy?: number; locationCapturedAt?: string }) {
+  static async startPause(userId: string) {
     const today = getISTDate();
     const rec = await db.prepare('SELECT * FROM attendance WHERE user_id = ? AND date = ?').get(userId, today) as any;
     if (!rec) throw new AppError(404, 'No check-in found for today');
@@ -133,20 +133,16 @@ export class AttendanceService {
     }
 
     const now = new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
-    const hasLocation = input?.latitude !== undefined && input?.longitude !== undefined;
-    if (hasLocation) {
-      await db.prepare("UPDATE attendance SET pause_start_time = ?, pause_end_time = NULL, status = 'on_break', latitude = ?, longitude = ?, location_accuracy = ?, location_captured_at = ?, updated_at = ? WHERE id = ?").run(now, input!.latitude, input!.longitude, input!.accuracy ?? null, input!.locationCapturedAt ?? now, now, rec.id);
-    } else {
-      await db.prepare("UPDATE attendance SET pause_start_time = ?, pause_end_time = NULL, status = 'on_break', updated_at = ? WHERE id = ?").run(now, now, rec.id);
-    }
-    logEvent(rec.id, userId, 'pause_start', input, now);
+    // Pause does not capture location.
+    await db.prepare("UPDATE attendance SET pause_start_time = ?, pause_end_time = NULL, status = 'on_break', updated_at = ? WHERE id = ?").run(now, now, rec.id);
+    logEvent(rec.id, userId, 'pause_start', {}, now);
     const updated = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(rec.id);
     await invalidateAttendanceCache();
     emitAttendanceUpdated(userId, updated);
     return updated;
   }
 
-  static async endPause(userId: string, input?: { latitude?: number; longitude?: number; accuracy?: number; locationCapturedAt?: string }) {
+  static async endPause(userId: string) {
     let today = getISTDate();
     let rec = await db.prepare('SELECT * FROM attendance WHERE user_id = ? AND date = ?').get(userId, today) as any;
     if (!rec) {
@@ -167,15 +163,10 @@ export class AttendanceService {
     const nowIso = now.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
 
     const restoreStatus = rec.status === 'remote' ? 'remote' : 'present';
-    const hasLocationEnd = input?.latitude !== undefined && input?.longitude !== undefined;
-    if (hasLocationEnd) {
-      await db.prepare(`UPDATE attendance SET pause_end_time = ?, pause_minutes = ?, status = ?, latitude = ?, longitude = ?, location_accuracy = ?, location_captured_at = ?, updated_at = ? WHERE id = ?`)
-        .run(nowIso, totalPause, restoreStatus, input!.latitude, input!.longitude, input!.accuracy ?? null, input!.locationCapturedAt ?? nowIso, nowIso, rec.id);
-    } else {
-      await db.prepare(`UPDATE attendance SET pause_end_time = ?, pause_minutes = ?, status = ?, updated_at = ? WHERE id = ?`)
-        .run(nowIso, totalPause, restoreStatus, nowIso, rec.id);
-    }
-    logEvent(rec.id, userId, 'pause_end', input, nowIso);
+    // Resume does not capture location.
+    await db.prepare(`UPDATE attendance SET pause_end_time = ?, pause_minutes = ?, status = ?, updated_at = ? WHERE id = ?`)
+      .run(nowIso, totalPause, restoreStatus, nowIso, rec.id);
+    logEvent(rec.id, userId, 'pause_end', {}, nowIso);
     const updated = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(rec.id);
     await invalidateAttendanceCache();
     emitAttendanceUpdated(userId, updated);

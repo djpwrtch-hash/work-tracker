@@ -476,7 +476,7 @@ export default function AttendancePage() {
 
   const startPause = useMutation({
     retry: 0,
-    mutationFn: async (loc?: { latitude?: number; longitude?: number; accuracy?: number; locationCapturedAt?: string } | null) => (await api.post('/attendance/pause-start', loc ?? {})).data,
+    mutationFn: async () => (await api.post('/attendance/pause-start', {})).data,
     onMutate: async () => {
       setAttError('');
       await qc.cancelQueries({ queryKey: ['todayAtt'] });
@@ -493,7 +493,7 @@ export default function AttendancePage() {
 
   const endPause = useMutation({
     retry: 0,
-    mutationFn: async (loc?: { latitude?: number; longitude?: number; accuracy?: number; locationCapturedAt?: string } | null) => (await api.post('/attendance/pause-end', loc ?? {})).data,
+    mutationFn: async () => (await api.post('/attendance/pause-end', {})).data,
     onMutate: async () => {
       setAttError('');
       await qc.cancelQueries({ queryKey: ['todayAtt'] });
@@ -508,46 +508,16 @@ export default function AttendancePage() {
     onSettled: () => { qc.invalidateQueries({ predicate: (q) => ['todayAtt', 'attendance', 'monthlySummary', 'todayAll', 'todayEvents'].includes(q.queryKey[0] as string) }); },
   });
 
-  const handleStartPause = async () => {
-    setGettingLocation(true);
-    setLocationProgress(null);
-    setLocationError(null);
-    try {
-      const result = await captureLocation({ onProgress: setLocationProgress });
-      const loc = (result as any)?.location ?? null;
-      const err = (result as any)?.error ?? null;
-      if (!loc && err) setLocationError(`${getLocationErrorMessage(err)} Pause will proceed without location.`);
-      setPendingPause('on_break');
-      startPause.mutate(loc ?? undefined, { onError: () => setPendingPause(null) });
-    } catch (e) {
-      setLocationError(`${getLocationErrorMessage(e)} Pause will proceed without location.`);
-      setPendingPause('on_break');
-      startPause.mutate(undefined, { onError: () => setPendingPause(null) });
-    } finally {
-      setGettingLocation(false);
-      setLocationProgress(null);
-    }
+  const handleStartPause = () => {
+    setAttError('');
+    setPendingPause('on_break');
+    startPause.mutate(undefined, { onError: () => setPendingPause(null) });
   };
 
-  const handleEndPause = async () => {
-    setGettingLocation(true);
-    setLocationProgress(null);
-    setLocationError(null);
-    try {
-      const result = await captureLocation({ onProgress: setLocationProgress });
-      const loc = (result as any)?.location ?? null;
-      const err = (result as any)?.error ?? null;
-      if (!loc && err) setLocationError(`${getLocationErrorMessage(err)} Resume will proceed without location.`);
-      setPendingPause('present');
-      endPause.mutate(loc ?? undefined, { onError: () => setPendingPause(null) });
-    } catch (e) {
-      setLocationError(`${getLocationErrorMessage(e)} Resume will proceed without location.`);
-      setPendingPause('present');
-      endPause.mutate(undefined, { onError: () => setPendingPause(null) });
-    } finally {
-      setGettingLocation(false);
-      setLocationProgress(null);
-    }
+  const handleEndPause = () => {
+    setAttError('');
+    setPendingPause('present');
+    endPause.mutate(undefined, { onError: () => setPendingPause(null) });
   };
 
   useEffect(() => {
@@ -641,9 +611,9 @@ export default function AttendancePage() {
             <div className="flex gap-2 flex-wrap">
               {!today.logout_time && displayStatus === 'present' && !isPaused && (
                 <>
-                  <button onClick={() => handleStartPause()} disabled={startPause.isPending || endPause.isPending || gettingLocation}
+                  <button onClick={() => handleStartPause()} disabled={startPause.isPending || endPause.isPending}
                     className="flex items-center gap-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 text-sm font-semibold transition disabled:opacity-50">
-                    {startPause.isPending || gettingLocation ? <Loader2 className="h-4 w-4 animate-spin" /> : <Coffee className="h-4 w-4" />}{gettingLocation ? (locationProgress !== null ? `Improving accuracy… ${locationProgress}m` : 'Getting location…') : 'Pause'}
+                    {startPause.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Coffee className="h-4 w-4" />}Pause
                   </button>
                   <button onClick={() => handleCheckOut()} disabled={checkOut.isPending || gettingLocation}
                     className="flex items-center gap-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 text-sm font-semibold transition disabled:opacity-50">
@@ -655,9 +625,9 @@ export default function AttendancePage() {
                 <p className="w-full mt-1 text-xs text-amber-400/80">{locationError}</p>
               )}
               {!today.logout_time && isPaused && (
-                <button onClick={() => handleEndPause()} disabled={endPause.isPending || startPause.isPending || gettingLocation}
+                <button onClick={() => handleEndPause()} disabled={endPause.isPending || startPause.isPending}
                   className="flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 text-sm font-semibold transition disabled:opacity-50">
-                  {endPause.isPending || gettingLocation ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}{gettingLocation ? (locationProgress !== null ? `Improving accuracy… ${locationProgress}m` : 'Getting location…') : 'Resume'}
+                  {endPause.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}Resume
                 </button>
               )}
               {today.logout_time && (
