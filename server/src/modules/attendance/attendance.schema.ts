@@ -28,7 +28,7 @@ export const monthlyQuerySchema = z.object({
   userId: z.string().trim().optional(),
 });
 
-const timeHHMM = z.string().trim().regex(/^\d{2}:\d{2}$/, 'Time must be HH:MM');
+const timeHHMM = z.string().trim().regex(/^\d{1,2}:\d{2}$/, 'Time must be HH:MM');
 const dateYYYYMMDD = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD');
 
 export const createExtraWorkSchema = z.object({
@@ -36,7 +36,13 @@ export const createExtraWorkSchema = z.object({
   startTime: timeHHMM,
   endTime: timeHHMM,
   notes: z.string().trim().max(500).optional(),
-}).refine((d) => d.startTime < d.endTime, { message: 'End time must be after start time', path: ['endTime'] });
+}).refine((d) => {
+  const toMinutes = (t: string) => {
+    const [h, m] = t.split(':').map(Number);
+    return (h ?? 0) * 60 + (m ?? 0);
+  };
+  return toMinutes(d.endTime) > toMinutes(d.startTime);
+}, { message: 'End time must be after start time', path: ['endTime'] });
 
 export const listAttendanceSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),

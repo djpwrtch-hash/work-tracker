@@ -252,10 +252,16 @@ export default function AttendancePage() {
   const liveExtraHours = (() => {
     const s = extraWork.startTime, e = extraWork.endTime;
     if (!s || !e) return null;
-    const [sH, sM] = s.split(':').map(Number);
-    const [eH, eM] = e.split(':').map(Number);
-    const start = sH * 60 + sM, end = eH * 60 + eM;
-    if (isNaN(start) || isNaN(end) || end <= start) return null;
+    const toMinutes = (t: string) => {
+      const parts = t.trim().split(':');
+      if (parts.length < 2) return NaN;
+      const h = Number(parts[0]);
+      const m = Number(parts[1]);
+      if (Number.isNaN(h) || Number.isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) return NaN;
+      return h * 60 + m;
+    };
+    const start = toMinutes(s), end = toMinutes(e);
+    if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return null;
     return Math.round(((end - start) / 60) * 100) / 100;
   })();
 
@@ -1175,7 +1181,6 @@ export default function AttendancePage() {
       </Modal>
     {/* Bulk Delete Confirmation */}
       <Modal open={showExtraWorkForm} onClose={() => setShowExtraWorkForm(false)} title="Log Extra Work">
-        <p className="text-xs text-slate-500 mb-4">Extra work you did (e.g., at home) without a check-in. HR will review and accept or delete this entry.</p>
         <div className="space-y-4">
           <div>
             <label className="block text-sm text-slate-300 mb-1">Date *</label>
@@ -1194,6 +1199,9 @@ export default function AttendancePage() {
           <div className="rounded-xl border border-slate-800 bg-slate-800/50 px-4 py-3">
             <span className="text-xs text-slate-400">Hours worked</span>
             <p className="text-lg font-bold text-white">{liveExtraHours !== null ? `${liveExtraHours} hour${liveExtraHours === 1 ? '' : 's'}` : '—'}</p>
+            {extraWork.startTime && extraWork.endTime && liveExtraHours === null && (
+              <p className="text-[10px] text-amber-400 mt-1">End time must be after start time.</p>
+            )}
           </div>
           <div>
             <label className="block text-sm text-slate-300 mb-1">Notes</label>

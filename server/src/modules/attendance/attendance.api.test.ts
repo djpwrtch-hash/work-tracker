@@ -73,6 +73,30 @@ describe('POST /api/v1/attendance/check-out', () => {
 });
 
 describe('extra work flow', () => {
+  it('accepts single-digit-hour times and computes hours correctly', async () => {
+    const emp = await createUser({ role: 'employee', password: 'Password123!' });
+    const empToken = (await loginAs(emp.email, 'Password123!')).token;
+    const created = await request(app).post('/api/v1/attendance/extra-work').set(authHeader(empToken)).send({
+      date: getISTNow().toISOString().split('T')[0]!,
+      startTime: '9:00',
+      endTime: '10:30',
+      notes: 'morning slot',
+    });
+    expect(created.status).toBe(201);
+    expect(Number(created.body.hours)).toBeCloseTo(1.5, 2);
+  });
+
+  it('rejects end time before start time', async () => {
+    const emp = await createUser({ role: 'employee', password: 'Password123!' });
+    const empToken = (await loginAs(emp.email, 'Password123!')).token;
+    const res = await request(app).post('/api/v1/attendance/extra-work').set(authHeader(empToken)).send({
+      date: getISTNow().toISOString().split('T')[0]!,
+      startTime: '9:30',
+      endTime: '9:00',
+    });
+    expect(res.status).toBe(400);
+  });
+
   it('employee logs extra work, HR reviews and accepts it', async () => {
     const emp = await createUser({ role: 'employee', password: 'Password123!' });
     const dir = await createUser({ role: 'director', password: 'Password123!' });

@@ -372,6 +372,8 @@ export class AttendanceService {
     const [eH0, eM0] = input.endTime.split(':');
     const [sH, sM] = [Number(sH0 ?? 0), Number(sM0 ?? 0)];
     const [eH, eM] = [Number(eH0 ?? 0), Number(eM0 ?? 0)];
+    if ([sH, sM, eH, eM].some((n) => Number.isNaN(n) || n < 0 || n > 59)) throw new AppError(400, 'Invalid time format');
+    if (sH > 23 || eH > 23) throw new AppError(400, 'Invalid time format');
     const startMinutes = sH * 60 + sM;
     const endMinutes = eH * 60 + eM;
     if (endMinutes <= startMinutes) throw new AppError(400, 'End time must be after start time');
