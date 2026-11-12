@@ -145,16 +145,18 @@ export class PlansService {
     if (plan.status !== 'draft' && plan.status !== 'submitted') throw new AppError(409, 'Only draft or submitted plans can be updated');
 
     // Normalise items if provided (re-sync)
-    let items: { text: string; priority: Priority; estimatedDays?: number | null }[] | null = null;
+    type PlanItemInput = { text: string; priority: Priority; estimatedDays?: number | null };
+    let items: PlanItemInput[] | null = null;
     if (Array.isArray(input.items)) {
-      items = input.items
+      const normalized: PlanItemInput[] = (input.items as any[])
         .map((it: any) => ({
           text: String(it?.text ?? '').trim(),
           priority: (it?.priority ?? 'medium') as Priority,
           estimatedDays: it?.estimatedDays ?? null,
         }))
-        .filter((it: any) => it.text.length > 0);
-      if (items.length > 50) throw new AppError(400, 'Too many points (max 50)');
+        .filter((it: PlanItemInput) => it.text.length > 0);
+      if (normalized.length > 50) throw new AppError(400, 'Too many points (max 50)');
+      items = normalized;
     }
 
     const plannedWork = items
