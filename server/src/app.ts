@@ -302,12 +302,28 @@ export function createApp() {
       ];
       const webOut = webOutCandidates.find((candidate) => fs.existsSync(candidate));
       if (webOut) {
-        app.use(express.static(webOut));
+        app.use(express.static(webOut, {
+          etag: true,
+          setHeaders(res, filePath) {
+            if (/\.(js|css|png|jpe?g|gif|svg|webp|woff2?|ico|map)$/i.test(filePath)) {
+              // Content-hashed build artifacts — safe to cache forever.
+              res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+            } else if (filePath.toLowerCase().endsWith('index.html')) {
+              // The shell must always be revalidated so clients pick up new hashed chunks.
+              res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            } else {
+              res.setHeader('Cache-Control', 'no-cache');
+            }
+          },
+        }));
         app.get('*', (req, res, next) => {
           if (req.path.startsWith('/api') || req.path.startsWith('/socket.io') || req.path.startsWith('/health') || req.path.startsWith('/ready') || req.path.startsWith('/api-docs')) return next();
           const indexPath = path.join(webOut, 'index.html');
-          if (fs.existsSync(indexPath)) res.sendFile(indexPath);
-          else next();
+          if (fs.existsSync(indexPath)) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            return res.sendFile(indexPath);
+          }
+          next();
         });
       }
     } catch {}

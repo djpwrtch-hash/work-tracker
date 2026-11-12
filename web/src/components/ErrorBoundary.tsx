@@ -18,6 +18,8 @@ interface State {
   errorInfo: ErrorInfo | null;
 }
 
+const CHUNK_RELOAD_KEY = 'wt-chunk-reload-v1';
+
 export class ErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
     super(props);
@@ -29,6 +31,25 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // Stale-chunk failure: after a redeploy, a cached page can reference a
+    // content-hashed chunk that no longer exists. Reload once to pick up the
+    // new shell; the sessionStorage guard prevents an infinite reload loop.
+    const msg = String(error?.message ?? '');
+    if (
+      /dynamically imported module|Failed to fetch dynamically imported|importing a module script|ChunkLoadError|Loading chunk [\w-]+ failed/i.test(
+        msg,
+      ) &&
+      !sessionStorage.getItem(CHUNK_RELOAD_KEY)
+    ) {
+      try {
+        sessionStorage.setItem(CHUNK_RELOAD_KEY, '1');
+        window.location.reload();
+        return;
+      } catch {
+        // sessionStorage unavailable — fall through to the fallback UI.
+      }
+    }
+
     this.setState({ errorInfo: errorInfo as unknown as ErrorInfo });
 
     if (!isProduction()) {
@@ -72,6 +93,9 @@ export class ErrorBoundary extends React.Component<Props, State> {
                   )}
                 </div>
               </details>
+            )}
+            {this.state.error && /dynamically imported module|Failed to fetch|ChunkLoadError|Loading chunk/i.test(String(this.state.error.message)) && (
+              <p className="text-sm text-amber-400 mb-4">The app was updated. Reloading will fetch the new version — try again, or press Ctrl+Shift+R.</p>
             )}
 
             <div className="flex items-center justify-center gap-4">
