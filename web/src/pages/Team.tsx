@@ -17,7 +17,7 @@ export default function TeamPage() {
   const { confirm } = useConfirm();
   const { user, loading } = useAuth();
   const qc = useQueryClient();
-  const isAdmin = user?.accessLevel === 'director';
+  const isAdmin = user?.accessLevel === 'director' || user?.accessLevel === 'hr';
   const [showCreate, setShowCreate] = useState(false);
   const [showManage, setShowManage] = useState<string | null>(null);
   const [showTasks, setShowTasks] = useState<string | null>(null);

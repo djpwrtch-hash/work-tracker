@@ -39,7 +39,7 @@ router.get('/:teamName', requireRole('director', 'hr'), apiCache({ ttl: 300_000 
   } catch (err) { next(err); }
 });
 
-router.post('/', requireRole('director'), validate(createTeamSchema), async (req: Request, res: Response, next) => {
+router.post('/', requireRole('director', 'hr'), validate(createTeamSchema), async (req: Request, res: Response, next) => {
   try {
     const team = await TeamsService.create(req.body);
     cache.delContaining('/api/v1/teams');
@@ -47,7 +47,7 @@ router.post('/', requireRole('director'), validate(createTeamSchema), async (req
   } catch (err) { next(err); }
 });
 
-router.put('/:teamName', requireRole('director'), validate(updateTeamSchema), async (req: Request, res: Response, next) => {
+router.put('/:teamName', requireRole('director', 'hr'), validate(updateTeamSchema), async (req: Request, res: Response, next) => {
   try {
     const team = await TeamsService.update(req.params.teamName!, req.body);
     cache.delContaining('/api/v1/teams');
@@ -55,7 +55,7 @@ router.put('/:teamName', requireRole('director'), validate(updateTeamSchema), as
   } catch (err) { next(err); }
 });
 
-router.post('/:teamName/members', requireRole('director'), validate(addMembersSchema), async (req: Request, res: Response, next) => {
+router.post('/:teamName/members', requireRole('director', 'hr'), validate(addMembersSchema), async (req: Request, res: Response, next) => {
   try {
     const team = await TeamsService.addMembers(req.params.teamName!, req.body.userIds);
     cache.delContaining('/api/v1/teams');
@@ -63,7 +63,7 @@ router.post('/:teamName/members', requireRole('director'), validate(addMembersSc
   } catch (err) { next(err); }
 });
 
-router.delete('/:teamName/members', requireRole('director'), validate(removeMembersSchema), async (req: Request, res: Response, next) => {
+router.delete('/:teamName/members', requireRole('director', 'hr'), validate(removeMembersSchema), async (req: Request, res: Response, next) => {
   try {
     const team = await TeamsService.removeMembers(req.params.teamName!, req.body.userIds);
     cache.delContaining('/api/v1/teams');
@@ -71,7 +71,7 @@ router.delete('/:teamName/members', requireRole('director'), validate(removeMemb
   } catch (err) { next(err); }
 });
 
-router.delete('/:teamName', requireRole('director'), validate(teamNameParamSchema, 'params'), async (req: Request, res: Response, next) => {
+router.delete('/:teamName', requireRole('director', 'hr'), validate(teamNameParamSchema, 'params'), async (req: Request, res: Response, next) => {
   try {
     const result = await TeamsService.delete(req.params.teamName!);
     cache.delContaining('/api/v1/teams');
