@@ -196,18 +196,18 @@ export function createApp() {
       await db.prepare('SELECT 1').get();
       const migration = await db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as any;
       const tables = await db.prepare(
-        "SELECT COUNT(*) AS count FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('users','departments','roles','attendance','leaves','tasks','holidays','attendance_correction_requests')"
+        "SELECT COUNT(*) AS count FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('users','departments','roles','attendance','leaves','tasks','holidays','attendance_correction_requests','attendance_extra_work')"
       ).get() as any;
       const version = Number(migration?.version ?? 0);
       const tableCount = Number(tables?.count ?? 0);
-      if (version < 22 || tableCount < 8) {
+      if (version < 23 || tableCount < 9) {
         res.status(503).json({
           status: 'not ready',
           timestamp,
           checks: {
             database: 'ok',
-            schema: version >= 22 ? 'ok' : `migration ${version}/22`,
-            coreTables: `${tableCount}/8`,
+            schema: version >= 23 ? 'ok' : `migration ${version}/23`,
+            coreTables: `${tableCount}/9`,
           },
         });
         return;

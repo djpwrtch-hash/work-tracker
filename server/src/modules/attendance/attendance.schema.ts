@@ -28,6 +28,16 @@ export const monthlyQuerySchema = z.object({
   userId: z.string().trim().optional(),
 });
 
+const timeHHMM = z.string().trim().regex(/^\d{2}:\d{2}$/, 'Time must be HH:MM');
+const dateYYYYMMDD = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD');
+
+export const createExtraWorkSchema = z.object({
+  date: dateYYYYMMDD,
+  startTime: timeHHMM,
+  endTime: timeHHMM,
+  notes: z.string().trim().max(500).optional(),
+}).refine((d) => d.startTime < d.endTime, { message: 'End time must be after start time', path: ['endTime'] });
+
 export const listAttendanceSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -89,3 +99,4 @@ export type CheckInInput = z.infer<typeof checkInSchema>;
 export type ListAttendanceInput = z.infer<typeof listAttendanceSchema>;
 export type UpdateAttendanceInput = z.infer<typeof updateAttendanceSchema>;
 export type DeleteAttendanceInput = z.infer<typeof deleteAttendanceSchema>;
+export type CreateExtraWorkInput = z.infer<typeof createExtraWorkSchema>;

@@ -564,6 +564,27 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       `);
     },
   },
+  {
+    version: 23,
+    name: 'extra-work',
+    up: async () => {
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS attendance_extra_work (
+          id VARCHAR(36) PRIMARY KEY,
+          user_id VARCHAR(36) NOT NULL,
+          date DATE NOT NULL,
+          start_time TIME NOT NULL,
+          end_time TIME NOT NULL,
+          hours DECIMAL(10,2) NOT NULL DEFAULT 0,
+          notes VARCHAR(500),
+          accepted TINYINT NOT NULL DEFAULT 0,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_aew_user_date (user_id, date)
+        )
+      `);
+    },
+  },
 ];
 
 await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (

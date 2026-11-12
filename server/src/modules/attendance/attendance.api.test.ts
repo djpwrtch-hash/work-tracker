@@ -3,7 +3,7 @@ import request from 'supertest';
 import { randomUUID } from 'crypto';
 import { app, createUser, loginAs, authHeader } from '../../test/helpers.js';
 import db from '../../db/index.js';
-import { getISTDate, getISTNow } from '../../lib/time.js';
+import { getISTNow } from '../../lib/time.js';
 
 const LOC = {
   latitude: 20.2961,
@@ -69,6 +69,61 @@ describe('POST /api/v1/attendance/check-out', () => {
     const { token } = await loginAs(user.email, 'Password123!');
     const res = await request(app).post('/api/v1/attendance/check-out').set(authHeader(token)).send({});
     expect([400, 404, 409]).toContain(res.status);
+  });
+});
+
+describe('extra work flow', () => {
+  it('employee logs extra work, HR reviews and accepts it', async () => {
+    const emp = await createUser({ role: 'employee', password: 'Password123!' });
+    const dir = await createUser({ role: 'director', password: 'Password123!' });
+    const empToken = (await loginAs(emp.email, 'Password123!')).token;
+    const dirToken = (await loginAs(dir.email, 'Password123!')).token;
+
+    const created = await request(app).post('/api/v1/attendance/extra-work').set(authHeader(empToken)).send({
+      date: getISTNow().toISOString().split('T')[0]!,
+      startTime: '14:00',
+      endTime: '17:30',
+      notes: 'release work',
+    });
+    expect(created.status).toBe(201);
+    expect(Number(created.body.hours)).toBeCloseTo(3.5, 1);
+    expect(created.body.accepted).toBe(false);
+
+    // employee sees own entry; director sees all
+    const mine = await request(app).get('/api/v1/attendance/extra-work').set(authHeader(empToken));
+    expect(mine.body.entries.length).toBeGreaterThanOrEqual(1);
+    expect(mine.body.totalHours).toBeGreaterThanOrEqual(3.5);
+
+    const entryId = created.body.id;
+    const accepted = await request(app).patch(`/api/v1/attendance/extra-work/${entryId}/accept`).set(authHeader(dirToken));
+    expect(accepted.status).toBe(200);
+
+    // employee cannot delete an accepted entry
+    await request(app).delete(`/api/v1/attendance/extra-work/${entryId}`).set(authHeader(empToken)).expect(409);
+
+    // monthly summary includes the hours
+    const summary = await request(app).get('/api/v1/attendance/monthly?month=' + (new Date().getMonth() + 1) + '&year=' + new Date().getFullYear()).set(authHeader(empToken));
+    expect(Number(summary.body.totalExtraWorkHours)).toBeGreaterThanOrEqual(3.5);
+
+    // director can delete even after acceptance
+    await request(app).delete(`/api/v1/attendance/extra-work/${entryId}`).set(authHeader(dirToken)).expect(200);
+  });
+
+  it('rejects invalid extra-work payloads', async () => {
+    const emp = await createUser({ role: 'employee', password: 'Password123!' });
+    const empToken = (await loginAs(emp.email, 'Password123!')).token;
+
+    await request(app).post('/api/v1/attendance/extra-work').set(authHeader(empToken)).send({
+      date: getISTNow().toISOString().split('T')[0]!,
+      startTime: '17:00',
+      endTime: '14:00',
+    }).expect(400);
+
+    await request(app).post('/api/v1/attendance/extra-work').set(authHeader(empToken)).send({
+      date: '2999-12-31',
+      startTime: '10:00',
+      endTime: '12:00',
+    }).expect(400);
   });
 });
 

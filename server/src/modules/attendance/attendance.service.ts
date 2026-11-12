@@ -51,6 +51,23 @@ async function notifyAdmins(userId: string, senderId: string, title: string, mes
   }
 }
 
+function mapExtraWork(r: any) {
+  return {
+    id: r.id,
+    userId: r.user_id,
+    date: r.date ? String(r.date).slice(0, 10) : r.date,
+    startTime: r.start_time ? String(r.start_time).slice(0, 5) : null,
+    endTime: r.end_time ? String(r.end_time).slice(0, 5) : null,
+    hours: Number(r.hours),
+    notes: r.notes,
+    accepted: !!r.accepted,
+    firstName: r.first_name,
+    lastName: r.last_name,
+    employeeId: r.employee_id,
+    createdAt: r.created_at,
+  };
+}
+
 export async function getAttendanceEvents(attendanceId: string): Promise<any[]> {
   return await db.prepare(
     "SELECT id, event_type, occurred_at, latitude, longitude, location_accuracy, location_captured_at FROM attendance_events WHERE attendance_id = ? ORDER BY occurred_at ASC"
@@ -348,6 +365,80 @@ export class AttendanceService {
     return { message: `Correction request ${status}` };
   }
 
+  static async createExtraWork(userId: string, input: { date: string; startTime: string; endTime: string; notes?: string }) {
+    const today = getISTDate();
+    if (input.date > today) throw new AppError(400, 'Future dates are not allowed');
+    const [sH0, sM0] = input.startTime.split(':');
+    const [eH0, eM0] = input.endTime.split(':');
+    const [sH, sM] = [Number(sH0 ?? 0), Number(sM0 ?? 0)];
+    const [eH, eM] = [Number(eH0 ?? 0), Number(eM0 ?? 0)];
+    const startMinutes = sH * 60 + sM;
+    const endMinutes = eH * 60 + eM;
+    if (endMinutes <= startMinutes) throw new AppError(400, 'End time must be after start time');
+    const hours = Math.round(((endMinutes - startMinutes) / 60) * 100) / 100;
+    if (hours > 24) throw new AppError(400, 'Extra work cannot exceed 24 hours');
+    const id = uuid();
+    await db.prepare(
+      'INSERT INTO attendance_extra_work (id, user_id, date, start_time, end_time, hours, notes) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(id, userId, input.date, `${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}:00`, `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}:00`, hours, input.notes ?? null);
+    await notifyAdmins(userId, userId, 'Extra work logged', `Extra work of ${hours}h on ${input.date} needs review`, 'approval', '/attendance');
+    await invalidateAttendanceCache();
+    return this.getExtraWorkById(id);
+  }
+
+  static async getExtraWorkById(id: string) {
+    const row = await db.prepare(
+      `SELECT xw.*, u.first_name, u.last_name, u.employee_id
+       FROM attendance_extra_work xw JOIN users u ON u.id = xw.user_id WHERE xw.id = ?`
+    ).get(id) as any;
+    if (!row) throw new AppError(404, 'Extra work entry not found');
+    return mapExtraWork(row);
+  }
+
+  static async listExtraWork(input: { userId?: string; startDate?: string; endDate?: string; accepted?: boolean; requesterId: string; requesterAccessLevel: string }) {
+    const conds: string[] = [];
+    const params: any[] = [];
+    if (input.requesterAccessLevel === 'employee') {
+      conds.push('xw.user_id = ?');
+      params.push(input.requesterId);
+    } else if (input.userId) {
+      conds.push('xw.user_id = ?');
+      params.push(input.userId);
+    }
+    if (input.startDate) { conds.push('xw.date >= ?'); params.push(input.startDate); }
+    if (input.endDate) { conds.push('xw.date <= ?'); params.push(input.endDate); }
+    if (input.accepted !== undefined) { conds.push('xw.accepted = ?'); params.push(input.accepted ? 1 : 0); }
+    const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
+    const rows = await db.prepare(
+      `SELECT xw.*, u.first_name, u.last_name, u.employee_id FROM attendance_extra_work xw JOIN users u ON u.id = xw.user_id ${where} ORDER BY xw.date DESC`
+    ).all(...params) as any[];
+    const totalHours = rows.reduce((sum, r) => sum + Number(r.hours), 0);
+    return { entries: rows.map(mapExtraWork), totalHours: Math.round(totalHours * 100) / 100 };
+  }
+
+  static async acceptExtraWork(id: string, reviewerId: string) {
+    const row = await db.prepare('SELECT * FROM attendance_extra_work WHERE id = ?').get(id) as any;
+    if (!row) throw new AppError(404, 'Extra work entry not found');
+    if (row.accepted) throw new AppError(409, 'Already accepted');
+    await db.prepare('UPDATE attendance_extra_work SET accepted = 1, updated_at = NOW() WHERE id = ? AND accepted = 0').run(id);
+    await db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(uuid(), row.user_id, reviewerId, 'Extra work accepted', `Your extra work of ${row.hours}h on ${row.date} was accepted`, 'success', '/attendance');
+    await invalidateAttendanceCache();
+    return { message: 'Extra work accepted' };
+  }
+
+  static async deleteExtraWork(id: string, userId: string, accessLevel: string) {
+    const row = await db.prepare('SELECT * FROM attendance_extra_work WHERE id = ?').get(id) as any;
+    if (!row) throw new AppError(404, 'Extra work entry not found');
+    if (accessLevel === 'employee') {
+      if (row.user_id !== userId) throw new AppError(403, 'Forbidden');
+      if (row.accepted) throw new AppError(409, 'Accepted entries cannot be deleted');
+    }
+    await db.prepare('DELETE FROM attendance_extra_work WHERE id = ?').run(id);
+    await invalidateAttendanceCache();
+    return { message: 'Extra work entry deleted' };
+  }
+
   static async list(input: any) {
     const { page = 1, limit = 20, userId, userIds, startDate, endDate, status, statuses } = input;
     const offset = (page - 1) * limit;
@@ -368,7 +459,7 @@ export class AttendanceService {
     if (endDate) { conds.push('a.date <= ?'); params.push(endDate); }
     const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
     const count = (await db.prepare(`SELECT count(*) as c FROM attendance a ${where}`).get(...params) as any).c;
-    const rows = await db.prepare(`SELECT a.*, u.first_name, u.last_name, u.employee_id, d.name as department_name FROM attendance a JOIN users u ON a.user_id = u.id LEFT JOIN departments d ON u.department_id = d.id ${where} ORDER BY a.date DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+    const rows = await db.prepare(`SELECT a.*, u.first_name, u.last_name, u.employee_id, d.name as department_name, COALESCE((SELECT SUM(hours) FROM attendance_extra_work xw WHERE xw.user_id = a.user_id AND xw.date = a.date), 0) AS extra_work_hours FROM attendance a JOIN users u ON a.user_id = u.id LEFT JOIN departments d ON u.department_id = d.id ${where} ORDER BY a.date DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
     return { records: rows, total: count, page, limit };
   }
 
@@ -508,6 +599,9 @@ export class AttendanceService {
       COALESCE(SUM(pause_minutes), 0) as total_pause_minutes
       FROM attendance WHERE user_id = ? AND date >= ? AND date <= ? AND logout_time IS NOT NULL`).get(userId, start, end) as any;
 
+    const extraWorkRow = await db.prepare('SELECT COALESCE(SUM(hours), 0) as total FROM attendance_extra_work WHERE user_id = ? AND date >= ? AND date <= ?').get(userId, start, end) as any;
+    const totalExtraWorkHours = Number(extraWorkRow?.total ?? 0);
+
     const totalWorkingHours = agg.total_working_hours;
     const totalPauseMinutes = agg.total_pause_minutes;
 
@@ -515,7 +609,7 @@ export class AttendanceService {
     const totalOvertimeHours = overtimeRow?.overtime_hours ?? 0;
     const standardHours = overtimeRow?.standard_hours ?? 0;
 
-    return { year, month, summary, totalWorkingHours, totalOvertimeHours, standardHours, regularHours: totalWorkingHours - totalOvertimeHours, totalPauseMinutes };
+    return { year, month, summary, totalWorkingHours, totalOvertimeHours, standardHours, regularHours: totalWorkingHours - totalOvertimeHours, totalPauseMinutes, totalExtraWorkHours };
   }
 
   static async calculateMonthlyOvertime(userId: string, year: number, month: number): Promise<void> {

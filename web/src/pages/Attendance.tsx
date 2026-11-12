@@ -211,6 +211,54 @@ export default function AttendancePage() {
     onError: (e: any) => toast.error(getApiError(e, 'Failed to review request')),
   });
 
+  const [showExtraWorkForm, setShowExtraWorkForm] = useState(false);
+  const [extraWork, setExtraWork] = useState({ date: '', startTime: '', endTime: '', notes: '' });
+
+  const { data: extraWorkAll } = useQuery({
+    queryKey: ['extraWorkEntries'],
+    queryFn: async () => (await api.get('/attendance/extra-work')).data,
+    refetchInterval: 30_000,
+    enabled: !loading && !!user,
+  });
+
+  const createExtraWork = useMutation({
+    mutationFn: async (d: { date: string; startTime: string; endTime: string; notes?: string }) => (await api.post('/attendance/extra-work', d)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['extraWorkEntries'] });
+      qc.invalidateQueries({ queryKey: ['attendance'] });
+      qc.invalidateQueries({ queryKey: ['todayAtt'] });
+      qc.invalidateQueries({ queryKey: ['monthlySummary'] });
+      setExtraWork({ date: '', startTime: '', endTime: '', notes: '' });
+      setShowExtraWorkForm(false);
+      toast.success('Extra work logged — awaiting HR review');
+    },
+    onError: (e: any) => toast.error(getApiError(e, 'Failed to log extra work')),
+  });
+
+  const reviewExtraWork = useMutation({
+    mutationFn: async ({ id, action }: { id: string; action: 'accept' | 'delete' }) =>
+      action === 'accept'
+        ? (await api.patch(`/attendance/extra-work/${id}/accept`)).data
+        : (await api.delete(`/attendance/extra-work/${id}`)).data,
+    onSuccess: (_result, vars) => {
+      toast.success(vars.action === 'accept' ? 'Extra work accepted' : 'Extra work deleted');
+      qc.invalidateQueries({ queryKey: ['extraWorkEntries'] });
+      qc.invalidateQueries({ queryKey: ['attendance'] });
+      qc.invalidateQueries({ queryKey: ['monthlySummary'] });
+    },
+    onError: (e: any) => toast.error(getApiError(e, 'Failed')),
+  });
+
+  const liveExtraHours = (() => {
+    const s = extraWork.startTime, e = extraWork.endTime;
+    if (!s || !e) return null;
+    const [sH, sM] = s.split(':').map(Number);
+    const [eH, eM] = e.split(':').map(Number);
+    const start = sH * 60 + sM, end = eH * 60 + eM;
+    if (isNaN(start) || isNaN(end) || end <= start) return null;
+    return Math.round(((end - start) / 60) * 100) / 100;
+  })();
+
   const displayStatus = pendingPause ?? today?.status;
   // Authoritative "is paused" signal: a pause row exists and has not been closed.
   // Falling back to status keeps this correct during the brief optimistic window.
@@ -356,6 +404,7 @@ export default function AttendancePage() {
       { header: 'Break', key: 'break', render: (r: any) => <span className="font-mono text-slate-300">{r.pause_minutes ? formatMinutes(r.pause_minutes) : '-'}</span> },
       { header: 'Duration', key: 'duration', render: (r: any) => <span className="font-mono text-slate-300">{formatDuration(getDisplayWorkingHours(r, now))}</span> },
       { header: 'Overtime', key: 'overtime', render: (r: any) => <span className="font-mono text-slate-300">{formatOvertime(r.overtime_hours)}</span> },
+      { header: 'Extra Work', key: 'extraWork', render: (r: any) => <span className="font-mono text-violet-300">{Number(r.extra_work_hours ?? 0) > 0 ? formatOvertime(Number(r.extra_work_hours)) : '-'}</span> },
       { header: 'Location', key: 'location', render: (r: any) => <LocationCell latitude={r.latitude} longitude={r.longitude} /> },
     );
     return cols;
@@ -378,6 +427,7 @@ export default function AttendancePage() {
     { header: 'Pause End', key: 'pauseEnd', render: (r: any) => <span className="font-mono text-slate-300">{r.pause_end_time ? formatExactTime(r.pause_end_time) : '-'}</span> },
     { header: 'Duration', key: 'duration', render: (r: any) => <span className="font-mono text-slate-300">{formatDuration(getDisplayWorkingHours(r, now))}</span> },
     { header: 'Overtime', key: 'overtime', render: (r: any) => <span className="font-mono text-slate-300">{formatOvertime(r.overtime_hours)}</span> },
+    { header: 'Extra Work', key: 'extraWork', render: (r: any) => <span className="font-mono text-violet-300">{Number(r.extra_work_hours ?? 0) > 0 ? formatOvertime(Number(r.extra_work_hours)) : '-'}</span> },
     { header: 'Location', key: 'location', render: (r: any) => <LocationCell latitude={r.latitude} longitude={r.longitude} /> },
   ], [now]);
 
@@ -572,6 +622,9 @@ export default function AttendancePage() {
         <div className="flex items-center justify-between flex-wrap gap-3">
           <h1 className="text-2xl font-bold text-white">Attendance</h1>
           <div className="flex gap-2">
+            <button onClick={() => setShowExtraWorkForm(true)} className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition border bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700">
+              <span>Log Extra Work</span>
+            </button>
             <button onClick={() => setShowCalendar(!showCalendar)} className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition border ${showCalendar ? 'bg-violet-600 border-violet-600 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}`}>
               {showCalendar ? 'Hide Calendar' : 'Calendar'}
             </button>
@@ -769,6 +822,35 @@ export default function AttendancePage() {
                   <div className="flex gap-2 flex-shrink-0">
                     <button onClick={() => reviewCorrectionRequest.mutate({ id: r.id, status: 'approved' })} disabled={reviewCorrectionRequest.isPending} className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-xs font-medium transition disabled:opacity-50">Approve</button>
                     <button onClick={() => reviewCorrectionRequest.mutate({ id: r.id, status: 'rejected' })} disabled={reviewCorrectionRequest.isPending} className="rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 text-xs font-medium transition disabled:opacity-50">Reject</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Extra work entries — review for HR/director, own list for others */}
+        {extraWorkAll?.entries && extraWorkAll.entries.length > 0 && (
+          <div className="bg-slate-900 border border-violet-500/20 rounded-2xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-bold text-white">Extra Work <span className="text-violet-400">({extraWorkAll.entries.length})</span></h2>
+              <span className="text-xs text-slate-500">{extraWorkAll.totalHours}h total</span>
+            </div>
+            <div className="divide-y divide-slate-800">
+              {extraWorkAll.entries.map((e: any) => (
+                <div key={e.id} className="py-3 flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-white">{isAdmin ? <>{e.firstName} {e.lastName} <span className="text-xs text-slate-500 font-normal">({e.employeeId})</span></> : 'You'}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">{formatDate(e.date)} · {e.startTime}–{e.endTime} ({e.hours}h){e.accepted ? ' · Accepted' : ' · Pending review'}{e.notes ? ` · ${e.notes}` : ''}</p>
+                  </div>
+                  <div className="flex gap-2 flex-shrink-0">
+                    {isAdmin && !e.accepted && (
+                      <button onClick={() => reviewExtraWork.mutate({ id: e.id, action: 'accept' })} disabled={reviewExtraWork.isPending} className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-xs font-medium transition disabled:opacity-50">Accept</button>
+                    )}
+                    {(!isAdmin ? !e.accepted : true) && (
+                      <button onClick={() => reviewExtraWork.mutate({ id: e.id, action: 'delete' })} disabled={reviewExtraWork.isPending} className="rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 text-xs font-medium transition disabled:opacity-50">{isAdmin ? 'Delete' : 'Remove'}</button>
+                    )}
+                    {isAdmin && e.accepted && <span className="text-xs text-emerald-400 font-medium px-3 py-1.5">Accepted</span>}
                   </div>
                 </div>
               ))}
@@ -1092,6 +1174,40 @@ export default function AttendancePage() {
         )}
       </Modal>
     {/* Bulk Delete Confirmation */}
+      <Modal open={showExtraWorkForm} onClose={() => setShowExtraWorkForm(false)} title="Log Extra Work">
+        <p className="text-xs text-slate-500 mb-4">Extra work you did (e.g., at home) without a check-in. HR will review and accept or delete this entry.</p>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-slate-300 mb-1">Date *</label>
+            <input type="date" value={extraWork.date} max={new Date().toISOString().split('T')[0]} onChange={(e) => setExtraWork({ ...extraWork, date: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm text-slate-300 mb-1">Start Time *</label>
+              <input type="time" value={extraWork.startTime} onChange={(e) => setExtraWork({ ...extraWork, startTime: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" />
+            </div>
+            <div>
+              <label className="block text-sm text-slate-300 mb-1">End Time *</label>
+              <input type="time" value={extraWork.endTime} onChange={(e) => setExtraWork({ ...extraWork, endTime: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" />
+            </div>
+          </div>
+          <div className="rounded-xl border border-slate-800 bg-slate-800/50 px-4 py-3">
+            <span className="text-xs text-slate-400">Hours worked</span>
+            <p className="text-lg font-bold text-white">{liveExtraHours !== null ? `${liveExtraHours} hour${liveExtraHours === 1 ? '' : 's'}` : '—'}</p>
+          </div>
+          <div>
+            <label className="block text-sm text-slate-300 mb-1">Notes</label>
+            <textarea value={extraWork.notes} onChange={(e) => setExtraWork({ ...extraWork, notes: e.target.value })} rows={2} maxLength={500} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" placeholder="What did you work on?" />
+          </div>
+          <button
+            onClick={() => { if (extraWork.date && extraWork.startTime && extraWork.endTime && liveExtraHours !== null) createExtraWork.mutate({ date: extraWork.date, startTime: extraWork.startTime, endTime: extraWork.endTime, notes: extraWork.notes || undefined }); }}
+            disabled={!extraWork.date || !extraWork.startTime || !extraWork.endTime || liveExtraHours === null || createExtraWork.isPending}
+            className="w-full rounded-xl bg-violet-600 hover:bg-violet-700 text-white py-2.5 text-sm font-semibold transition disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {createExtraWork.isPending && <Loader2 className="h-4 w-4 animate-spin" />}Submit
+          </button>
+        </div>
+      </Modal>
       <Modal
         open={showDeleteConfirm}
         onClose={() => { setShowDeleteConfirm(false); setDeleteText(''); setDeleteMsg(''); }}

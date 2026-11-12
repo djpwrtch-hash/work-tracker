@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { validate, requireUuid } from '../../middleware/validate.js';
 import { authenticate } from '../../middleware/authenticate.js';
 import { requireRole } from '../../middleware/rbac.js';
-import { checkInSchema, listAttendanceSchema, updateAttendanceSchema, monthlyQuerySchema, deleteAttendanceSchema, locationOptionalSchema, reviewCorrectionRequestSchema } from './attendance.schema.js';
+import { checkInSchema, listAttendanceSchema, updateAttendanceSchema, monthlyQuerySchema, deleteAttendanceSchema, locationOptionalSchema, reviewCorrectionRequestSchema, createExtraWorkSchema } from './attendance.schema.js';
 import { AttendanceService, getAttendanceEvents, getAttendanceEventsForUser, getPauseLog } from './attendance.service.js';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service.js';
 
@@ -35,6 +35,41 @@ router.post('/pause-end', async (req: Request, res: Response, next) => {
   try {
     const record = await AttendanceService.endPause(req.user!.sub);
     res.json(record);
+  } catch (err) { next(err); }
+});
+
+router.post('/extra-work', validate(createExtraWorkSchema), async (req: Request, res: Response, next) => {
+  try {
+    const result = await AttendanceService.createExtraWork(req.user!.sub, req.body);
+    res.status(201).json(result);
+  } catch (err) { next(err); }
+});
+
+router.get('/extra-work', async (req: Request, res: Response, next) => {
+  try {
+    const result = await AttendanceService.listExtraWork({
+      userId: req.query.userId as string | undefined,
+      startDate: req.query.startDate as string | undefined,
+      endDate: req.query.endDate as string | undefined,
+      accepted: req.query.accepted !== undefined ? req.query.accepted === 'true' : undefined,
+      requesterId: req.user!.sub,
+      requesterAccessLevel: req.user!.accessLevel,
+    });
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+router.patch('/extra-work/:id/accept', requireRole('director', 'hr'), requireUuid('id'), async (req: Request, res: Response, next) => {
+  try {
+    const result = await AttendanceService.acceptExtraWork(String(req.params.id!), req.user!.sub);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+router.delete('/extra-work/:id', requireUuid('id'), async (req: Request, res: Response, next) => {
+  try {
+    const result = await AttendanceService.deleteExtraWork(String(req.params.id!), req.user!.sub, req.user!.accessLevel);
+    res.json(result);
   } catch (err) { next(err); }
 });
 
