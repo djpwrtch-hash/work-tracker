@@ -104,7 +104,7 @@ employee-work-tracker/
 | **Auth** | JWT login/register, refresh token rotation, password reset, account lockout |
 | **Attendance** | Check-in/out, pause/resume, geolocation, auto-absent scheduler, overtime detection, extra-work logging |
 | **Tasks** | CRUD with assignments, comments, approvals, progress tracking, statistics |
-| **Work Plans** | Daily planning with submission, per-point priority and estimated days, manager review workflow |
+| **Work Plans** | Daily planning with submission, per-point priority, estimated hours and days, manager review workflow |
 | **Work Reports** | End-of-day reports with feedback and blockers tracking |
 | **Leaves** | Application, approval, cancellation, balance tracking, working-day calculation |
 | **Documents** | Employee requests for appointment letters, experience/internship/leaving certificates and salary slips; HR/Admin fill a boilerplate template and issue; auto-generated PDF/Word download with notifications |

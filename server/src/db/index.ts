@@ -618,6 +618,13 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       }
     },
   },
+  {
+    version: 25,
+    name: 'work-plan-items-hours',
+    up: async () => {
+      await addColumnIfMissing('work_plan_items', 'estimated_hours', 'estimated_hours DECIMAL(5,2) NULL AFTER estimated_days');
+    },
+  },
 ];
 
 await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (

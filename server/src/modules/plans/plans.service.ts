@@ -26,6 +26,7 @@ function mapPlan(p: any, items: any[] = []) {
       text: it.item_text,
       priority: it.priority,
       estimatedDays: it.estimated_days != null ? Number(it.estimated_days) : null,
+      estimatedHours: it.estimated_hours != null ? Number(it.estimated_hours) : null,
     })),
   };
 }
@@ -58,13 +59,14 @@ export class PlansService {
     if (existing) throw new AppError(409, 'Plan already exists for this date');
     const id = uuid();
 
-    let items: { text: string; priority: Priority; estimatedDays?: number | null }[];
+    let items: { text: string; priority: Priority; estimatedDays?: number | null; estimatedHours?: number | null }[];
     if (Array.isArray(input.items) && input.items.length > 0) {
       items = input.items
         .map((it: any) => ({
           text: String(it?.text ?? '').trim(),
           priority: (it?.priority ?? 'medium') as Priority,
           estimatedDays: it?.estimatedDays ?? null,
+          estimatedHours: it?.estimatedHours ?? null,
         }))
         .filter((it: any) => it.text.length > 0);
     } else {
@@ -72,7 +74,7 @@ export class PlansService {
         .split(/\r?\n/)
         .map((l: string) => l.trim())
         .filter(Boolean)
-        .map((text: string) => ({ text, priority: (input.priority ?? 'medium') as Priority, estimatedDays: null }));
+        .map((text: string) => ({ text, priority: (input.priority ?? 'medium') as Priority, estimatedDays: null, estimatedHours: null }));
     }
     if (items.length === 0) throw new AppError(400, 'At least one point is required');
     if (items.length > 50) throw new AppError(400, 'Too many points (max 50)');
@@ -85,8 +87,8 @@ export class PlansService {
           .run(id, userId, date, plannedWork, topPriority, input.estimatedHours ?? null, 'submitted');
         for (let i = 0; i < items.length; i++) {
           const it = items[i]!;
-          await db.prepare('INSERT INTO work_plan_items (id, plan_id, point_number, item_text, priority, estimated_days) VALUES (?, ?, ?, ?, ?, ?)')
-            .run(uuid(), id, i + 1, it.text, it.priority, it.estimatedDays ?? null);
+          await db.prepare('INSERT INTO work_plan_items (id, plan_id, point_number, item_text, priority, estimated_days, estimated_hours) VALUES (?, ?, ?, ?, ?, ?, ?)')
+            .run(uuid(), id, i + 1, it.text, it.priority, it.estimatedDays ?? null, it.estimatedHours ?? null);
         }
 
         const admins = await db.prepare("SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr')").all() as any[];
@@ -145,7 +147,7 @@ export class PlansService {
     if (plan.status !== 'draft' && plan.status !== 'submitted') throw new AppError(409, 'Only draft or submitted plans can be updated');
 
     // Normalise items if provided (re-sync)
-    type PlanItemInput = { text: string; priority: Priority; estimatedDays?: number | null };
+    type PlanItemInput = { text: string; priority: Priority; estimatedDays?: number | null; estimatedHours?: number | null };
     let items: PlanItemInput[] | null = null;
     if (Array.isArray(input.items)) {
       const normalized: PlanItemInput[] = (input.items as any[])
@@ -153,6 +155,7 @@ export class PlansService {
           text: String(it?.text ?? '').trim(),
           priority: (it?.priority ?? 'medium') as Priority,
           estimatedDays: it?.estimatedDays ?? null,
+          estimatedHours: it?.estimatedHours ?? null,
         }))
         .filter((it: PlanItemInput) => it.text.length > 0);
       if (normalized.length > 50) throw new AppError(400, 'Too many points (max 50)');
@@ -173,8 +176,8 @@ export class PlansService {
         await db.prepare('DELETE FROM work_plan_items WHERE plan_id = ?').run(id);
         for (let i = 0; i < items.length; i++) {
           const it = items[i]!;
-          await db.prepare('INSERT INTO work_plan_items (id, plan_id, point_number, item_text, priority, estimated_days) VALUES (?, ?, ?, ?, ?, ?)')
-            .run(uuid(), id, i + 1, it.text, it.priority, it.estimatedDays ?? null);
+          await db.prepare('INSERT INTO work_plan_items (id, plan_id, point_number, item_text, priority, estimated_days, estimated_hours) VALUES (?, ?, ?, ?, ?, ?, ?)')
+            .run(uuid(), id, i + 1, it.text, it.priority, it.estimatedDays ?? null, it.estimatedHours ?? null);
         }
       }
     })();

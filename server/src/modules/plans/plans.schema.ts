@@ -5,6 +5,7 @@ export const planItemSchema = z.object({
   text: z.string().trim().min(1, 'Point text is required').max(1000, 'Point text too long'),
   priority: planItemPriority.default('medium'),
   estimatedDays: z.number().min(0, 'Days must be positive').max(365, 'Days too large').optional(),
+  estimatedHours: z.number().min(0, 'Hours must be positive').max(1000, 'Hours too large').optional(),
 });
 export const planItemsSchema = z.array(planItemSchema).max(50, 'Too many points (max 50)');
 

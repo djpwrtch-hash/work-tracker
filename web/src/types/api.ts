@@ -109,6 +109,7 @@ export interface PlanItem {
   text: string;
   priority: 'low' | 'medium' | 'high' | 'urgent';
   estimatedDays: number | null;
+  estimatedHours: number | null;
 }
 
 export interface WorkPlan {

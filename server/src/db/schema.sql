@@ -235,6 +235,7 @@ CREATE TABLE IF NOT EXISTS work_plan_items (
   item_text TEXT NOT NULL,
   priority ENUM('low','medium','high','urgent') NOT NULL DEFAULT 'medium',
   estimated_days DECIMAL(5,1),
+  estimated_hours DECIMAL(5,2),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_wpi_plan_point (plan_id, point_number),

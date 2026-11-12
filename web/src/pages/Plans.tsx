@@ -14,7 +14,7 @@ export default function PlansPage() {
   const isAdmin = user?.accessLevel === 'director' || user?.accessLevel === 'hr';
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ plannedWork: '', date: new Date().toISOString().split('T')[0] });
-  const [itemMeta, setItemMeta] = useState<Record<number, { priority: string; estimatedDays: string }>>({});
+  const [itemMeta, setItemMeta] = useState<Record<number, { priority: string; estimatedDays: string; estimatedHours: string }>>({});
   const [error, setError] = useState('');
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
 
@@ -45,6 +45,7 @@ export default function PlansPage() {
       ...p,
       priority: itemMeta[p.idx]?.priority ?? 'medium',
       estimatedDays: itemMeta[p.idx]?.estimatedDays ?? '',
+      estimatedHours: itemMeta[p.idx]?.estimatedHours ?? '',
     }));
 
   const createPlan = useMutation({
@@ -55,6 +56,7 @@ export default function PlansPage() {
         text: p.text,
         priority: p.priority,
         estimatedDays: p.estimatedDays ? Number(p.estimatedDays) : undefined,
+        estimatedHours: p.estimatedHours ? Number(p.estimatedHours) : undefined,
       })),
     })).data,
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['plans'] }); setShowCreate(false); setForm({ plannedWork: '', date: new Date().toISOString().split('T')[0] }); setItemMeta({}); },
@@ -108,10 +110,10 @@ export default function PlansPage() {
       const rows = plans.flatMap((p: any) => {
         const base = { Date: p.date, Status: p.status, Review: p.reviewComment ?? '' };
         const items = p.items ?? [];
-        if (items.length === 0) return [{ ...base, Point: '', PointText: p.plannedWork, Priority: p.priority, 'Est. Days': '' }];
-        return items.map((it: any) => ({ ...base, Point: it.pointNumber, PointText: it.text, Priority: it.priority, 'Est. Days': it.estimatedDays ?? '' }));
+        if (items.length === 0) return [{ ...base, Point: '', PointText: p.plannedWork, Priority: p.priority, 'Est. Days': '', 'Est. Hours': '' }];
+        return items.map((it: any) => ({ ...base, Point: it.pointNumber, PointText: it.text, Priority: it.priority, 'Est. Days': it.estimatedDays ?? '', 'Est. Hours': it.estimatedHours ?? '' }));
       });
-      const headers = ['Date', 'Point', 'PointText', 'Priority', 'Est. Days', 'Status', 'Review'];
+      const headers = ['Date', 'Point', 'PointText', 'Priority', 'Est. Days', 'Est. Hours', 'Status', 'Review'];
       if (format === 'pdf') await exportToPDF(rows, `work-plans-${name}`, headers, `Work Plans — ${employee ? `${employee.firstName} ${employee.lastName}` : userId}`);
       else if (format === 'csv') exportToCSV(rows, `work-plans-${name}`, headers);
       else await exportToExcel(rows, `work-plans-${name}`, headers);
@@ -217,7 +219,11 @@ export default function PlansPage() {
                         <span className="text-xs text-slate-500 font-mono w-6 text-right flex-shrink-0 mt-0.5">{it.pointNumber}.</span>
                         <span className="min-w-0 flex-1">{it.text}</span>
                         <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] uppercase font-semibold border flex-shrink-0 ${statusColor(it.priority)}`}>{it.priority}</span>
-                        {it.estimatedDays != null && <span className="text-[10px] text-slate-500 flex-shrink-0 mt-0.5">~{it.estimatedDays}d</span>}
+                        {(it.estimatedDays != null || it.estimatedHours != null) && (
+                          <span className="text-[10px] text-slate-500 flex-shrink-0 mt-0.5">
+                            {[it.estimatedDays != null && `~${it.estimatedDays}d`, it.estimatedHours != null && `~${it.estimatedHours}h`].filter(Boolean).join(' ')}
+                          </span>
+                        )}
                       </li>
                     ))}
                     {(!p.items || p.items.length === 0) && <p className="text-sm text-white whitespace-pre-wrap">{p.plannedWork}</p>}
@@ -253,7 +259,7 @@ export default function PlansPage() {
           {error && <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm rounded-xl px-4 py-3 mb-4">{error}</div>}
           <div className="space-y-4">
             <div><label className="block text-sm text-slate-300 mb-1">Date</label><input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" /></div>
-            <div><label className="block text-sm text-slate-300 mb-1">Plan Points (one per line, press Enter for new point) *</label><textarea value={form.plannedWork} onChange={(e) => setForm({ ...form, plannedWork: e.target.value })} rows={6} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white font-mono" placeholder={'e.g.\nReplace database connection pool\nFix login page regression\nReview PRs from team'} /></div>
+            <div><label className="block text-sm text-slate-300 mb-1">Plan Points (one per line, press Enter for new point) *</label><textarea value={form.plannedWork} onChange={(e) => setForm({ ...form, plannedWork: e.target.value })} rows={6} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white font-mono" /></div>
             {points.length > 0 && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -264,16 +270,17 @@ export default function PlansPage() {
                   <div key={p.idx} className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-800/40 px-3 py-2">
                     <span className="text-xs text-slate-500 font-mono w-6 flex-shrink-0">{points.findIndex((x) => x.idx === p.idx) + 1}.</span>
                     <span className="text-sm text-slate-200 flex-1 min-w-0 truncate">{p.text}</span>
-                    <select value={p.priority} onChange={(e) => setItemMeta((m) => ({ ...m, [p.idx]: { ...m[p.idx], priority: e.target.value, estimatedDays: m[p.idx]?.estimatedDays ?? '' } }))} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-white w-24">
+                    <select value={p.priority} onChange={(e) => setItemMeta((m) => ({ ...m, [p.idx]: { ...m[p.idx], priority: e.target.value } }))} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-white w-24">
                       <option value="low">Low</option>
                       <option value="medium">Medium</option>
                       <option value="high">High</option>
                       <option value="urgent">Urgent</option>
                     </select>
-                    <input type="number" min="0" step="0.5" placeholder="Days" value={p.estimatedDays} onChange={(e) => setItemMeta((m) => ({ ...m, [p.idx]: { priority: m[p.idx]?.priority ?? 'medium', estimatedDays: e.target.value } }))} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-white w-20" />
+                    <input type="number" min="0" step="0.25" placeholder="Hours" value={p.estimatedHours} onChange={(e) => setItemMeta((m) => ({ ...m, [p.idx]: { ...m[p.idx], estimatedHours: e.target.value } }))} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-white w-20" />
+                    <input type="number" min="0" step="0.5" placeholder="Days" value={p.estimatedDays} onChange={(e) => setItemMeta((m) => ({ ...m, [p.idx]: { ...m[p.idx], estimatedDays: e.target.value } }))} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-white w-20" />
                   </div>
                 ))}
-                <p className="text-[10px] text-slate-500">Priority and estimated days apply per point. Submit sends all points as one plan entry.</p>
+                <p className="text-[10px] text-slate-500">Priority and estimated hours/days apply per point. Submit sends all points as one plan entry.</p>
               </div>
             )}
             <button onClick={() => createPlan.mutate()} disabled={!form.plannedWork.trim() || points.length === 0 || createPlan.isPending}
