@@ -19,6 +19,7 @@ import { getRoleAccessLevel } from '../../lib/roles.js';
 const SALT_ROUNDS = 12;
 const MAX_LOGIN_ATTEMPTS = config.maxLoginAttempts;
 const LOCKOUT_MINUTES = config.lockoutMinutes;
+const IP_MAX_ATTEMPTS = Number(process.env.MAX_IP_LOGIN_ATTEMPTS ?? 10000);
 const IP_WINDOW_MS = 15 * 60 * 1000;
 const EMAIL_WINDOW_MS = 15 * 60 * 1000;
 const PROGRESSIVE_DELAY_THRESHOLD = 3;
@@ -26,6 +27,7 @@ const PROGRESSIVE_DELAY_MS = 1000;
 const SECURITY_ALERT_THRESHOLD = 3;
 
 // DB-backed so login throttling survives restarts and is shared across replicas.
+// IP-based limit is intentionally generous to avoid locking out shared office IPs.
 const ipLimiter = new RateLimitStore('login:ip');
 const emailLimiter = new RateLimitStore('login:email');
 ipLimiter.init({ windowMs: IP_WINDOW_MS });
@@ -38,7 +40,7 @@ export class AuthService {
     // Rate limit by IP (fixed 15-minute window, stored in MySQL)
     const ipKey = ip ?? 'unknown';
     const ipResult = await ipLimiter.increment(ipKey);
-    if (ipResult.totalHits > MAX_LOGIN_ATTEMPTS) {
+    if (ipResult.totalHits > IP_MAX_ATTEMPTS) {
       const retryAfterMs = Math.max(0, (ipResult.resetTime?.getTime() ?? Date.now()) - Date.now());
       throw new AppError(429, `Too many login attempts from this IP. Retry after ${Math.ceil(retryAfterMs / 1000)} seconds`);
     }

@@ -1,16 +1,26 @@
 import { z } from 'zod';
 
+const planItemPriority = z.enum(['low', 'medium', 'high', 'urgent']);
+export const planItemSchema = z.object({
+  text: z.string().trim().min(1, 'Point text is required').max(1000, 'Point text too long'),
+  priority: planItemPriority.default('medium'),
+  estimatedDays: z.number().min(0, 'Days must be positive').max(365, 'Days too large').optional(),
+});
+export const planItemsSchema = z.array(planItemSchema).max(50, 'Too many points (max 50)');
+
 export const createPlanSchema = z.object({
   date: z.string().trim().datetime('Invalid date format'),
   plannedWork: z.string().trim().min(1, 'Planned work is required').max(5000, 'Planned work too long'),
-  priority: z.enum(['low', 'medium', 'high', 'urgent']).default('medium'),
+  priority: planItemPriority.default('medium'),
   estimatedHours: z.number().min(0, 'Hours must be positive').max(24, 'Hours cannot exceed 24 for a day').optional(),
+  items: planItemsSchema.optional(),
 });
 
 export const updatePlanSchema = z.object({
   plannedWork: z.string().trim().min(1, 'Planned work is required').max(5000, 'Planned work too long').optional(),
-  priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
+  priority: planItemPriority.optional(),
   estimatedHours: z.number().min(0, 'Hours must be positive').max(24, 'Hours cannot exceed 24 for a day').optional(),
+  items: planItemsSchema.optional(),
 });
 
 export const listPlansSchema = z.object({
@@ -20,6 +30,7 @@ export const listPlansSchema = z.object({
   startDate: z.string().trim().optional(),
   endDate: z.string().trim().optional(),
   status: z.enum(['draft', 'submitted', 'reviewed', 'approved', 'rejected']).optional(),
+  priority: planItemPriority.optional(),
 });
 
 export const reviewPlanSchema = z.object({

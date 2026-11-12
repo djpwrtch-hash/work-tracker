@@ -104,14 +104,22 @@ export interface TaskComment {
   createdAt: string;
 }
 
+export interface PlanItem {
+  pointNumber: number;
+  text: string;
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  estimatedDays: number | null;
+}
+
 export interface WorkPlan {
   id: string;
   userId: string;
   date: string;
   plannedWork: string;
-  priority: 'low' | 'medium' | 'high';
+  priority: 'low' | 'medium' | 'high' | 'urgent';
   estimatedHours: number | null;
-  status: 'draft' | 'submitted' | 'approved' | 'rejected';
+  items?: PlanItem[];
+  status: 'draft' | 'submitted' | 'reviewed' | 'approved' | 'rejected';
   reviewComment: string | null;
   reviewedBy: string | null;
   reviewedAt: string | null;

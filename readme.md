@@ -9,7 +9,7 @@ A production-grade full-stack workforce management application for small to medi
 | Layer | Technology |
 |-------|-----------|
 | **Backend** | Node.js 22+, Express 4.x, TypeScript, mysql2 (MySQL) |
-| **Database** | MySQL 8.0 via `mysql2/promise`. `server/src/db/schema.sql` is the source of truth (migrations 1-23 are idempotent). |
+| **Database** | MySQL 8.0 via `mysql2/promise`. `server/src/db/schema.sql` is the source of truth (migrations 1-24 are idempotent). |
 | **Deployment** | Docker (localhost) / PM2 |
 
 ## Quick Start (localhost)
@@ -104,7 +104,7 @@ employee-work-tracker/
 | **Auth** | JWT login/register, refresh token rotation, password reset, account lockout |
 | **Attendance** | Check-in/out, pause/resume, geolocation, auto-absent scheduler, overtime detection, extra-work logging |
 | **Tasks** | CRUD with assignments, comments, approvals, progress tracking, statistics |
-| **Work Plans** | Daily planning with submission and manager review workflow |
+| **Work Plans** | Daily planning with submission, per-point priority and estimated days, manager review workflow |
 | **Work Reports** | End-of-day reports with feedback and blockers tracking |
 | **Leaves** | Application, approval, cancellation, balance tracking, working-day calculation |
 | **Documents** | Employee requests for appointment letters, experience/internship/leaving certificates and salary slips; HR/Admin fill a boilerplate template and issue; auto-generated PDF/Word download with notifications |
@@ -275,7 +275,7 @@ The Dockerfile builds the API and `web/dist`, then serves both from one origin, 
 installs `mysql-client` for backups.
 
 1. Create a Railway project and add a **MySQL** service. Use a **fresh/empty database**;
-   the app creates `schema.sql` and applies migrations 1-23 on first boot.
+   the app creates `schema.sql` and applies migrations 1-24 on first boot.
    Do **not** point `DATABASE_URL` at a copy of an older/newer database (for example a
    local `hr` that already has multi-tenant `org_id` columns or migration 19 from
    another branch) — that schema is not compatible with this code.

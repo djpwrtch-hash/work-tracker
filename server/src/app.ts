@@ -143,7 +143,7 @@ export function createApp() {
   }));
   const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: config.nodeEnv === 'production' ? 500 : 1000,
+    max: config.nodeEnv === 'production' ? 500 : 10000,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests, please try again later.' },
@@ -151,7 +151,7 @@ export function createApp() {
   });
   const writeLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: config.nodeEnv === 'production' ? 200 : 500,
+    max: config.nodeEnv === 'production' ? 200 : 5000,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many write requests, please slow down.' },
@@ -182,8 +182,11 @@ export function createApp() {
       }
       res.json({ status: 'stopping' });
       // Reuse the graceful shutdown path in server.ts; the unref'd timer is a safety net.
-      const safety = setTimeout(() => process.exit(0), 8000);
-      safety.unref();
+      // Skipped under test so a pending timer can't kill a shared worker mid-suite.
+      if (config.nodeEnv !== 'test') {
+        const safety = setTimeout(() => process.exit(0), 8000);
+        safety.unref();
+      }
       setTimeout(() => { void requestShutdown('stop endpoint'); }, 100);
     });
   }
@@ -196,18 +199,18 @@ export function createApp() {
       await db.prepare('SELECT 1').get();
       const migration = await db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as any;
       const tables = await db.prepare(
-        "SELECT COUNT(*) AS count FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('users','departments','roles','attendance','leaves','tasks','holidays','attendance_correction_requests','attendance_extra_work')"
+        "SELECT COUNT(*) AS count FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('users','departments','roles','attendance','leaves','tasks','holidays','attendance_correction_requests','attendance_extra_work','work_plan_items')"
       ).get() as any;
       const version = Number(migration?.version ?? 0);
       const tableCount = Number(tables?.count ?? 0);
-      if (version < 23 || tableCount < 9) {
+      if (version < 24 || tableCount < 10) {
         res.status(503).json({
           status: 'not ready',
           timestamp,
           checks: {
             database: 'ok',
-            schema: version >= 23 ? 'ok' : `migration ${version}/23`,
-            coreTables: `${tableCount}/9`,
+            schema: version >= 24 ? 'ok' : `migration ${version}/24`,
+            coreTables: `${tableCount}/10`,
           },
         });
         return;

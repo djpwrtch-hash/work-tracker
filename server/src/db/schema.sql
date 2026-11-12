@@ -228,6 +228,19 @@ CREATE TABLE IF NOT EXISTS work_plans (
   FOREIGN KEY (reviewed_by_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS work_plan_items (
+  id VARCHAR(36) PRIMARY KEY,
+  plan_id VARCHAR(36) NOT NULL,
+  point_number INT NOT NULL,
+  item_text TEXT NOT NULL,
+  priority ENUM('low','medium','high','urgent') NOT NULL DEFAULT 'medium',
+  estimated_days DECIMAL(5,1),
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_wpi_plan_point (plan_id, point_number),
+  FOREIGN KEY (plan_id) REFERENCES work_plans(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS work_reports (
   id VARCHAR(36) PRIMARY KEY,
   user_id VARCHAR(36) NOT NULL,
