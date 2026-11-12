@@ -17,6 +17,7 @@ export default function PlansPage() {
   const [itemMeta, setItemMeta] = useState<Record<number, { priority: string; estimatedDays: string; estimatedHours: string }>>({});
   const [error, setError] = useState('');
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState('');
 
   const { data: slotsData } = useQuery({
     queryKey: ['planSlots'],
@@ -32,8 +33,8 @@ export default function PlansPage() {
   });
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['plans', selectedEmployee],
-    queryFn: async () => (await api.get('/plans', { params: { limit: 50, userId: selectedEmployee || undefined } })).data,
+    queryKey: ['plans', selectedEmployee, statusFilter],
+    queryFn: async () => (await api.get('/plans', { params: { limit: 50, userId: selectedEmployee || undefined, status: statusFilter || undefined } })).data,
     enabled: !loading && !!user,
   });
 
@@ -146,18 +147,34 @@ export default function PlansPage() {
         </div>
 
         {isAdmin && (
-          <div>
-            <label className="block text-sm text-slate-300 mb-1">Employee</label>
-            <select
-              value={selectedEmployee || ''}
-              onChange={(e) => setSelectedEmployee(e.target.value || null)}
-              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white"
-            >
-              <option value="">All Employees</option>
-              {employees.map((emp: any) => (
-                <option key={emp.id} value={emp.id}>{emp.firstName} {emp.lastName}</option>
-              ))}
-            </select>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-slate-300 mb-1">Employee</label>
+              <select
+                value={selectedEmployee || ''}
+                onChange={(e) => setSelectedEmployee(e.target.value || null)}
+                className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white"
+              >
+                <option value="">All Employees</option>
+                {employees.map((emp: any) => (
+                  <option key={emp.id} value={emp.id}>{emp.firstName} {emp.lastName}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm text-slate-300 mb-1">Status</label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white"
+              >
+                <option value="">Hide drafts (default)</option>
+                <option value="draft">Drafts only</option>
+                <option value="submitted">Submitted</option>
+                <option value="approved">Approved</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </div>
           </div>
         )}
 
@@ -229,6 +246,7 @@ export default function PlansPage() {
                     {(!p.items || p.items.length === 0) && <p className="text-sm text-white whitespace-pre-wrap">{p.plannedWork}</p>}
                   </ol>
                   {p.reviewComment && <p className="text-xs text-slate-400 mt-2 italic">Review: {p.reviewComment}</p>}
+                  {p.status === 'draft' && <p className="text-[10px] text-slate-500 mt-2 italic">Draft — hidden from reviewers until submitted.</p>}
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
                   {p.status === 'draft' && (

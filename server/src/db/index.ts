@@ -625,6 +625,16 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       await addColumnIfMissing('work_plan_items', 'estimated_hours', 'estimated_hours DECIMAL(5,2) NULL AFTER estimated_days');
     },
   },
+  {
+    version: 26,
+    name: 'auto-submit-legacy-drafts',
+    up: async () => {
+      // Legacy plans/reports created before auto-submit-on-create are 'draft' and
+      // are hidden from HR/director by default. Flip them to 'submitted' so they surface.
+      await db.exec("UPDATE work_plans SET status = 'submitted', updated_at = NOW() WHERE status = 'draft'");
+      await db.exec("UPDATE work_reports SET status = 'submitted', updated_at = NOW() WHERE status = 'draft'");
+    },
+  },
 ];
 
 await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (

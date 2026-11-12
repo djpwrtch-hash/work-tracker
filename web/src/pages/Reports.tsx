@@ -19,6 +19,7 @@ export default function ReportsPage() {
   const { confirm } = useConfirm();
   const [showCreate, setShowCreate] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState('');
   const [form, setForm] = useState({ workCompletedToday: '', currentProgress: '' as unknown as number, pendingWork: '', blockers: '', tomorrowPlan: '', date: new Date().toISOString().split('T')[0] });
   const [error, setError] = useState('');
 
@@ -36,10 +37,11 @@ export default function ReportsPage() {
   });
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['reports', selectedEmployee],
+    queryKey: ['reports', selectedEmployee, statusFilter],
     queryFn: async () => {
       const params: any = { limit: 50 };
       if (selectedEmployee) params.userId = selectedEmployee;
+      if (statusFilter) params.status = statusFilter;
       return (await api.get('/reports', { params })).data;
     },
     enabled: !loading && !!user,
@@ -148,6 +150,18 @@ export default function ReportsPage() {
                   {emp.firstName || emp.first_name} {emp.lastName || emp.last_name}
                 </option>
               ))}
+            </select>
+            <label className="text-sm text-slate-400">Status:</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white"
+            >
+              <option value="">Hide drafts (default)</option>
+              <option value="draft">Drafts only</option>
+              <option value="submitted">Submitted</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
             </select>
           </div>
         )}
