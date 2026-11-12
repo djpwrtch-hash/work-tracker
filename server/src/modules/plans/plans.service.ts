@@ -18,6 +18,7 @@ function mapPlan(p: any, items: any[] = []) {
   return {
     id: p.id, userId: p.user_id, date: p.date, plannedWork: p.planned_work,
     priority: p.priority, estimatedHours: p.estimated_hours, status: p.status,
+    submittedAt: p.submitted_at ?? null,
     reviewComment: p.review_comment, reviewedById: p.reviewed_by_id, reviewedAt: p.reviewed_at,
     createdAt: p.created_at, updatedAt: p.updated_at,
     firstName: p.first_name, lastName: p.last_name, employeeId: p.employee_id,
@@ -83,8 +84,11 @@ export class PlansService {
 
     try {
       await db.transaction(async () => {
-        await db.prepare('INSERT INTO work_plans (id, user_id, date, planned_work, priority, estimated_hours, status) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        await db.prepare('INSERT INTO work_plans (id, user_id, date, planned_work, priority, estimated_hours, status, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())')
           .run(id, userId, date, plannedWork, topPriority, input.estimatedHours ?? null, 'submitted');
+        const submitter = await db.prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(userId) as any;
+        const submitterName = submitter ? `${submitter.first_name} ${submitter.last_name}` : 'Someone';
+        const submitterTime = new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata', hour12: true, hour: '2-digit', minute: '2-digit' });
         for (let i = 0; i < items.length; i++) {
           const it = items[i]!;
           await db.prepare('INSERT INTO work_plan_items (id, plan_id, point_number, item_text, priority, estimated_days, estimated_hours) VALUES (?, ?, ?, ?, ?, ?, ?)')
@@ -97,7 +101,7 @@ export class PlansService {
         for (const a of admins) {
           await insertNotif.run(uuid(), a.id, userId,
             urgentCount > 0 ? '[URGENT] Plan Submitted' : 'Plan Submitted',
-            `Work plan for ${date} is pending your review${urgentCount > 0 ? ` (${urgentCount} urgent point${urgentCount > 1 ? 's' : ''})` : ''}`,
+            `Work plan for ${date} submitted by ${submitterName} at ${submitterTime} — pending your review${urgentCount > 0 ? ` (${urgentCount} urgent point${urgentCount > 1 ? 's' : ''})` : ''}`,
             'approval', `/plans/${id}`);
         }
       })();
@@ -191,11 +195,14 @@ export class PlansService {
       if (!plan) throw new AppError(404, 'Plan not found');
       if (plan.user_id !== userId) throw new AppError(403, 'Cannot submit others plan');
       if (plan.status !== 'draft') throw new AppError(409, 'Only draft plans can be submitted');
-      await db.prepare("UPDATE work_plans SET status = 'submitted', updated_at = NOW() WHERE id = ?").run(id);
+      await db.prepare("UPDATE work_plans SET status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = ?").run(id);
+      const submitter = await db.prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(userId) as any;
+      const submitterName = submitter ? `${submitter.first_name} ${submitter.last_name}` : 'Someone';
+      const submitterTime = new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata', hour12: true, hour: '2-digit', minute: '2-digit' });
       const admins = await db.prepare("SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr')").all() as any[];
       const insertNotif = db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)');
       for (const a of admins) {
-        await insertNotif.run(uuid(), a.id, userId, 'Plan Submitted', `Work plan for ${plan.date} is pending your review`, 'approval', `/plans/${id}`);
+        await insertNotif.run(uuid(), a.id, userId, 'Plan Submitted', `Work plan for ${plan.date} submitted by ${submitterName} at ${submitterTime} — pending your review`, 'approval', `/plans/${id}`);
       }
       return await loadPlan(id);
     })();

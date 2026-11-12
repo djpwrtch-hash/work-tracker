@@ -2,7 +2,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, getApiError } from '@/lib/api';
-import { formatDate, statusColor } from '@/lib/utils';
+import { formatDate, formatISTTime, statusColor } from '@/lib/utils';
 import { useState } from 'react';
 import { Plus, Loader2, Trash2, Download, FileText } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -232,6 +232,11 @@ export default function ReportsPage() {
                     {r.blockers && <span className="text-rose-400">Blockers: {r.blockers}</span>}
                   </div>
                   {r.feedback && <p className="text-xs text-slate-400 mt-2 italic">Feedback: {r.feedback}</p>}
+                  {r.submittedAt && (
+                    <p className="text-[10px] text-slate-500 mt-2">
+                      Submitted by {r.firstName} {r.lastName} · {formatDate(r.submittedAt)} · {formatISTTime(r.submittedAt)}
+                    </p>
+                  )}
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
                   {r.status === 'draft' && <button onClick={() => submitReport.mutate(r.id)} disabled={submitReport.isPending} className="rounded-lg bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 flex items-center gap-1">{submitReport.isPending && <Loader2 className="h-3 w-3 animate-spin" />}Submit</button>}

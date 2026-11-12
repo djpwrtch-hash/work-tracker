@@ -2,7 +2,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, getApiError } from '@/lib/api';
-import { formatDate, statusColor } from '@/lib/utils';
+import { formatDate, formatISTTime, statusColor } from '@/lib/utils';
 import { useState } from 'react';
 import { Plus, Loader2, Trash2, Download } from 'lucide-react';
 import { exportToCSV, exportToExcel, exportToPDF } from '@/lib/utils';
@@ -247,6 +247,11 @@ export default function PlansPage() {
                   </ol>
                   {p.reviewComment && <p className="text-xs text-slate-400 mt-2 italic">Review: {p.reviewComment}</p>}
                   {p.status === 'draft' && <p className="text-[10px] text-slate-500 mt-2 italic">Draft — hidden from reviewers until submitted.</p>}
+                  {p.submittedAt && (
+                    <p className="text-[10px] text-slate-500 mt-2">
+                      Submitted by {p.firstName} {p.lastName} · {formatDate(p.submittedAt)} · {formatISTTime(p.submittedAt)}
+                    </p>
+                  )}
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
                   {p.status === 'draft' && (

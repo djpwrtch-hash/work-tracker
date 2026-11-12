@@ -3,10 +3,10 @@ import db from '../db/index.js';
 import { ensureAdminBootstrap } from '../db/bootstrap.js';
 
 describe('database migrations', () => {
-  it('applies all 26 migrations in order', async () => {
+  it('applies all 27 migrations in order', async () => {
     const rows = (await db.prepare('SELECT version FROM schema_migrations ORDER BY version').all()) as any[];
     const versions = rows.map((r) => Number(r.version));
-    expect(versions).toEqual(Array.from({ length: 26 }, (_, i) => i + 1));
+    expect(versions).toEqual(Array.from({ length: 27 }, (_, i) => i + 1));
   });
 
   it('creates all core tables', async () => {
@@ -40,7 +40,7 @@ describe('database migrations', () => {
     // migration looked applied forever and this file could never catch it.
     const rows = (await db.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all()) as any[];
     const versions = rows.map((r) => Number(r.version));
-    expect(versions).toEqual(expect.arrayContaining([1, 26]));
+    expect(versions).toEqual(expect.arrayContaining([1, 27]));
     expect(versions.every((v) => Number.isInteger(v) && v > 0)).toBe(true);
     expect(new Set(versions).size).toBe(versions.length);
   });

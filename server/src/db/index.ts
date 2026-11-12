@@ -635,6 +635,18 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       await db.exec("UPDATE work_reports SET status = 'submitted', updated_at = NOW() WHERE status = 'draft'");
     },
   },
+  {
+    version: 27,
+    name: 'submission-timestamps',
+    up: async () => {
+      await addColumnIfMissing('work_plans', 'submitted_at', 'submitted_at DATETIME NULL AFTER status');
+      await addColumnIfMissing('work_reports', 'submitted_at', 'submitted_at DATETIME NULL AFTER status');
+      // Backfill: for never-reviewed submitted rows, updated_at is the submission
+      // instant; for reviewed rows, updated_at is the review time, so use created_at.
+      await db.exec("UPDATE work_plans SET submitted_at = (CASE WHEN status = 'submitted' THEN COALESCE(updated_at, created_at) WHEN status IN ('reviewed','approved','rejected') THEN created_at ELSE NULL END) WHERE submitted_at IS NULL");
+      await db.exec("UPDATE work_reports SET submitted_at = (CASE WHEN status = 'submitted' THEN COALESCE(updated_at, created_at) WHEN status IN ('reviewed','approved','rejected') THEN created_at ELSE NULL END) WHERE submitted_at IS NULL");
+    },
+  },
 ];
 
 await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (

@@ -7,6 +7,7 @@ function mapReport(r: any) {
     id: r.id, userId: r.user_id, date: r.date, workCompletedToday: r.work_completed_today,
     currentProgress: r.current_progress, pendingWork: r.pending_work, blockers: r.blockers,
     tomorrowPlan: r.tomorrow_plan, status: r.status, feedback: r.feedback,
+    submittedAt: r.submitted_at ?? null,
     reviewedById: r.reviewed_by_id, reviewedAt: r.reviewed_at,
     createdAt: r.created_at, updatedAt: r.updated_at,
     firstName: r.first_name, lastName: r.last_name, employeeId: r.employee_id,
@@ -22,13 +23,15 @@ export class ReportsService {
     const id = uuid();
     try {
       await db.transaction(async () => {
-        await db.prepare('INSERT INTO work_reports (id, user_id, date, work_completed_today, current_progress, pending_work, blockers, tomorrow_plan, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        await db.prepare('INSERT INTO work_reports (id, user_id, date, work_completed_today, current_progress, pending_work, blockers, tomorrow_plan, status, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())')
           .run(id, userId, date, input.workCompletedToday, input.currentProgress ?? 0, input.pendingWork ?? null, input.blockers ?? null, input.tomorrowPlan ?? null, 'submitted');
-
+        const submitter = await db.prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(userId) as any;
+        const submitterName = submitter ? `${submitter.first_name} ${submitter.last_name}` : 'Someone';
+        const submitterTime = new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata', hour12: true, hour: '2-digit', minute: '2-digit' });
         const admins = await db.prepare("SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr')").all() as any[];
         const insertNotif = db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)');
         for (const a of admins) {
-          await insertNotif.run(uuid(), a.id, userId, 'Report Submitted', `Daily report for ${date} is pending your review`, 'approval', `/reports/${id}`);
+          await insertNotif.run(uuid(), a.id, userId, 'Report Submitted', `Daily report for ${date} submitted by ${submitterName} at ${submitterTime} — pending your review`, 'approval', `/reports/${id}`);
         }
       })();
     } catch (err: any) {
@@ -91,11 +94,14 @@ export class ReportsService {
       if (!report) throw new AppError(404, 'Report not found');
       if (report.user_id !== userId) throw new AppError(403, 'Cannot submit others report');
       if (report.status !== 'draft') throw new AppError(409, 'Only draft reports can be submitted');
-      await db.prepare("UPDATE work_reports SET status = 'submitted', updated_at = NOW() WHERE id = ?").run(id);
+      await db.prepare("UPDATE work_reports SET status = 'submitted', submitted_at = NOW(), updated_at = NOW() WHERE id = ?").run(id);
+      const submitter = await db.prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(userId) as any;
+      const submitterName = submitter ? `${submitter.first_name} ${submitter.last_name}` : 'Someone';
+      const submitterTime = new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata', hour12: true, hour: '2-digit', minute: '2-digit' });
       const admins = await db.prepare("SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr')").all() as any[];
       const insertNotif = db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)');
       for (const a of admins) {
-        await insertNotif.run(uuid(), a.id, userId, 'Report Submitted', `Daily report for ${report.date} is pending your review`, 'approval', `/reports/${id}`);
+        await insertNotif.run(uuid(), a.id, userId, 'Report Submitted', `Daily report for ${report.date} submitted by ${submitterName} at ${submitterTime} — pending your review`, 'approval', `/reports/${id}`);
       }
       return mapReport(await db.prepare('SELECT * FROM work_reports WHERE id = ?').get(id));
     })();

@@ -121,6 +121,7 @@ export interface WorkPlan {
   estimatedHours: number | null;
   items?: PlanItem[];
   status: 'draft' | 'submitted' | 'reviewed' | 'approved' | 'rejected';
+  submittedAt: string | null;
   reviewComment: string | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
@@ -137,6 +138,7 @@ export interface WorkReport {
   blockers: string | null;
   tomorrowPlan: string | null;
   status: 'draft' | 'submitted' | 'approved' | 'rejected';
+  submittedAt: string | null;
   reviewComment: string | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
