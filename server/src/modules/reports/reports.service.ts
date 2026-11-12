@@ -36,8 +36,13 @@ export class ReportsService {
     const offset = (page - 1) * limit;
     const conds: string[] = []; const params: any[] = [];
 
-    if (role === 'employee') { conds.push('wr.user_id = ?'); params.push(userId); }
-    else if (filterUserId) { conds.push('wr.user_id = ?'); params.push(filterUserId); }
+    if (role === 'employee') {
+      conds.push('wr.user_id = ?');
+      params.push(userId);
+    } else {
+      if (filterUserId) { conds.push('wr.user_id = ?'); params.push(filterUserId); }
+      if (!status) { conds.push("wr.status != 'draft'"); }
+    }
     if (status) { conds.push('wr.status = ?'); params.push(status); }
     if (startDate) { conds.push('wr.date >= ?'); params.push(startDate); }
     if (endDate) { conds.push('wr.date <= ?'); params.push(endDate); }

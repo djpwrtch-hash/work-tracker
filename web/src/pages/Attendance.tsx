@@ -1,4 +1,5 @@
 import DashboardLayout from '@/components/DashboardLayout';
+import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, getApiError } from '@/lib/api';
@@ -181,6 +182,33 @@ export default function AttendancePage() {
     queryFn: async () => (await api.get('/attendance/today')).data,
     refetchInterval: 60000,
     enabled: !loading && !!user,
+  });
+
+  const { data: correctionRequest } = useQuery({
+    queryKey: ['correctionRequest'],
+    queryFn: async () => (await api.get('/attendance/correction-requests/mine')).data,
+    refetchInterval: 30_000,
+    enabled: !loading && !!user,
+  });
+
+  const { data: pendingCorrectionRequests, refetch: refetchCorrectionRequests } = useQuery({
+    queryKey: ['correctionRequests'],
+    queryFn: async () => (await api.get('/attendance/correction-requests?status=pending')).data?.requests ?? [],
+    refetchInterval: 30_000,
+    enabled: !loading && isAdmin,
+  });
+
+  const reviewCorrectionRequest = useMutation({
+    retry: 0,
+    mutationFn: async ({ id, status, comment }: { id: string; status: 'approved' | 'rejected'; comment?: string }) =>
+      (await api.patch(`/attendance/correction-requests/${id}`, { status, comment })).data,
+    onSuccess: (result, vars) => {
+      toast.success(vars.status === 'approved' ? 'Request approved' : 'Request rejected');
+      qc.invalidateQueries({ queryKey: ['correctionRequests'] });
+      qc.invalidateQueries({ queryKey: ['correctionRequest'] });
+      qc.invalidateQueries({ queryKey: ['todayAtt'] });
+    },
+    onError: (e: any) => toast.error(getApiError(e, 'Failed to review request')),
   });
 
   const displayStatus = pendingPause ?? today?.status;
@@ -410,9 +438,23 @@ export default function AttendancePage() {
     onError: (e: any, _v, ctx) => {
       if (ctx?.prev === undefined) qc.removeQueries({ queryKey: ['todayAtt'] });
       else qc.setQueryData(['todayAtt'], ctx.prev);
+      const serverMsg = e?.response?.data?.error ?? '';
+      if (serverMsg === 'STALE_ATTENDANCE') {
+        setAttError('You missed a check-out from a previous day. Close it first, then wait for approval to check in.');
+        toast.error('Missed check-out from a previous day — close it first');
+        qc.invalidateQueries({ queryKey: ['correctionRequest'] });
+        return;
+      }
+      if (serverMsg === 'PENDING_APPROVAL') {
+        setAttError('Your check-in request is waiting for HR/Director approval');
+        toast.error('Waiting for HR approval to check in');
+        qc.invalidateQueries({ queryKey: ['correctionRequest'] });
+        return;
+      }
       setAttError(getApiError(e, 'Check-in failed'));
+      toast.error(getApiError(e, 'Check-in failed'));
     },
-    onSettled: () => { qc.invalidateQueries({ predicate: (q) => ['todayAtt', 'attendance', 'monthlySummary', 'todayAll'].includes(q.queryKey[0] as string) }); },
+    onSettled: () => { qc.invalidateQueries({ predicate: (q) => ['todayAtt', 'attendance', 'monthlySummary', 'todayAll', 'todayEvents', 'correctionRequest', 'correctionRequests'].includes(q.queryKey[0] as string) }); },
   });
 
   const checkOut = useMutation({
@@ -429,7 +471,7 @@ export default function AttendancePage() {
       if (ctx?.prev) qc.setQueryData(['todayAtt'], ctx.prev);
       setAttError(getApiError(e, 'Check-out failed'));
     },
-    onSettled: () => { qc.invalidateQueries({ predicate: (q) => ['todayAtt', 'attendance', 'monthlySummary', 'todayAll', 'todayEvents'].includes(q.queryKey[0] as string) }); },
+    onSettled: () => { qc.invalidateQueries({ predicate: (q) => ['todayAtt', 'attendance', 'monthlySummary', 'todayAll', 'todayEvents', 'correctionRequest', 'correctionRequests'].includes(q.queryKey[0] as string) }); },
   });
 
   const handleCheckOut = async () => {
@@ -488,7 +530,7 @@ export default function AttendancePage() {
       if (ctx?.prev) qc.setQueryData(['todayAtt'], ctx.prev);
       setAttError(getApiError(e, 'Pause failed'));
     },
-    onSettled: () => { qc.invalidateQueries({ predicate: (q) => ['todayAtt', 'attendance', 'monthlySummary', 'todayAll', 'todayEvents'].includes(q.queryKey[0] as string) }); },
+    onSettled: () => { qc.invalidateQueries({ predicate: (q) => ['todayAtt', 'attendance', 'monthlySummary', 'todayAll', 'todayEvents', 'correctionRequest', 'correctionRequests'].includes(q.queryKey[0] as string) }); },
   });
 
   const endPause = useMutation({
@@ -505,7 +547,7 @@ export default function AttendancePage() {
       if (ctx?.prev) qc.setQueryData(['todayAtt'], ctx.prev);
       setAttError(getApiError(e, 'Resume failed'));
     },
-    onSettled: () => { qc.invalidateQueries({ predicate: (q) => ['todayAtt', 'attendance', 'monthlySummary', 'todayAll', 'todayEvents'].includes(q.queryKey[0] as string) }); },
+    onSettled: () => { qc.invalidateQueries({ predicate: (q) => ['todayAtt', 'attendance', 'monthlySummary', 'todayAll', 'todayEvents', 'correctionRequest', 'correctionRequests'].includes(q.queryKey[0] as string) }); },
   });
 
   const handleStartPause = () => {
@@ -669,7 +711,35 @@ export default function AttendancePage() {
           </div>
         )}
 
-        {!todayLoading && (!today || (!today.logout_time && ['leave', 'holiday', 'absent'].includes(today.status))) && (
+        {/* Missed check-out from a previous day */}
+        {correctionRequest?.staleRecord && (
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-amber-400">Missed check-out</p>
+              <p className="text-xs text-amber-400/80 mt-1">You were active from {formatExactTime(correctionRequest.staleRecord.loginTime)} on {formatDate(correctionRequest.staleRecord.date)}. Worked ~{correctionRequest.staleRecord.hoursWorked}h. Close it to request approval to check in today.</p>
+            </div>
+            <button onClick={() => handleCheckOut()} disabled={checkOut.isPending || gettingLocation} className="flex items-center gap-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white px-4 py-2.5 text-sm font-semibold transition disabled:opacity-50 whitespace-nowrap">
+              {checkOut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}Close check-out
+            </button>
+          </div>
+        )}
+        {correctionRequest && !correctionRequest.staleRecord && correctionRequest.status === 'pending' && (
+          <div className="bg-sky-500/10 border border-sky-500/20 rounded-2xl px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-sky-400">Waiting for approval</p>
+              <p className="text-xs text-sky-400/80 mt-1">Your request to check in today was sent to HR/Director. Check-in will be available once approved.</p>
+            </div>
+            <div className="h-8 w-8 border-2 border-sky-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+          </div>
+        )}
+        {correctionRequest && correctionRequest.status === 'rejected' && (
+          <div className="bg-rose-500/10 border border-rose-500/20 rounded-2xl px-5 py-4">
+            <p className="text-sm font-semibold text-rose-400">Check-in request rejected</p>
+            <p className="text-xs text-rose-400/80 mt-1">{correctionRequest.reviewComment ? `Reason: ${correctionRequest.reviewComment}. Please contact your manager.` : 'Please contact your manager for help.'}</p>
+          </div>
+        )}
+
+        {!todayLoading && correctionRequest && !correctionRequest.staleRecord && correctionRequest.status !== 'pending' && (!today || (!today.logout_time && ['leave', 'holiday', 'absent'].includes(today.status))) && (
           <div>
             <button onClick={handleCheckIn} disabled={checkIn.isPending || gettingLocation}
               className="flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 text-sm font-semibold transition disabled:opacity-50">
@@ -678,6 +748,31 @@ export default function AttendancePage() {
             {locationError && (
               <p className="mt-2 text-xs text-amber-400/80">{locationError}</p>
             )}
+          </div>
+        )}
+
+        {/* Pending check-in permission requests — Admin/HR only */}
+        {isAdmin && pendingCorrectionRequests && pendingCorrectionRequests.length > 0 && (
+          <div className="bg-slate-900 border border-amber-500/20 rounded-2xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-bold text-white">Check-in Requests <span className="text-amber-400">({pendingCorrectionRequests.length})</span></h2>
+              <button onClick={() => refetchCorrectionRequests()} className="text-xs text-slate-400 hover:text-white transition">Refresh</button>
+            </div>
+            <div className="divide-y divide-slate-800">
+              {pendingCorrectionRequests.map((r: any) => (
+                <div key={r.id} className="py-3 flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-white">{r.firstName} {r.lastName} <span className="text-xs text-slate-500 font-normal">({r.employeeId})</span></p>
+                    <p className="text-xs text-slate-500 mt-0.5">Missed check-out on {r.attendanceDate ? formatDate(r.attendanceDate) : '—'} · logged in at {formatExactTime(r.loginTime)}</p>
+                    {r.reason && <p className="text-xs text-slate-400 mt-0.5">{r.reason}</p>}
+                  </div>
+                  <div className="flex gap-2 flex-shrink-0">
+                    <button onClick={() => reviewCorrectionRequest.mutate({ id: r.id, status: 'approved' })} disabled={reviewCorrectionRequest.isPending} className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-xs font-medium transition disabled:opacity-50">Approve</button>
+                    <button onClick={() => reviewCorrectionRequest.mutate({ id: r.id, status: 'rejected' })} disabled={reviewCorrectionRequest.isPending} className="rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 text-xs font-medium transition disabled:opacity-50">Reject</button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

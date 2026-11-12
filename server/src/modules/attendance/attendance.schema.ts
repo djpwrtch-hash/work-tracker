@@ -78,6 +78,13 @@ export const deleteAttendanceSchema = z.object({
   confirm: z.enum(['DELETE']).optional(),
 });
 
+export const reviewCorrectionRequestSchema = z.object({
+  status: z.enum(['approved', 'rejected']),
+  comment: z.string().trim().max(500).optional(),
+});
+
+export type ReviewCorrectionRequestInput = z.infer<typeof reviewCorrectionRequestSchema>;
+
 export type CheckInInput = z.infer<typeof checkInSchema>;
 export type ListAttendanceInput = z.infer<typeof listAttendanceSchema>;
 export type UpdateAttendanceInput = z.infer<typeof updateAttendanceSchema>;

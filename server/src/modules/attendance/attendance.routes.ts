@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { validate, requireUuid } from '../../middleware/validate.js';
 import { authenticate } from '../../middleware/authenticate.js';
 import { requireRole } from '../../middleware/rbac.js';
-import { checkInSchema, listAttendanceSchema, updateAttendanceSchema, monthlyQuerySchema, deleteAttendanceSchema, locationOptionalSchema } from './attendance.schema.js';
+import { checkInSchema, listAttendanceSchema, updateAttendanceSchema, monthlyQuerySchema, deleteAttendanceSchema, locationOptionalSchema, reviewCorrectionRequestSchema } from './attendance.schema.js';
 import { AttendanceService, getAttendanceEvents, getAttendanceEventsForUser, getPauseLog } from './attendance.service.js';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service.js';
 
@@ -35,6 +35,32 @@ router.post('/pause-end', async (req: Request, res: Response, next) => {
   try {
     const record = await AttendanceService.endPause(req.user!.sub);
     res.json(record);
+  } catch (err) { next(err); }
+});
+
+router.get('/correction-requests/mine', async (req: Request, res: Response, next) => {
+  try {
+    const result = await AttendanceService.getMyCorrectionRequest(req.user!.sub);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+router.get('/correction-requests', requireRole('director', 'hr'), async (req: Request, res: Response, next) => {
+  try {
+    const status = (req.query.status as string)?.trim();
+    if (status && !['pending', 'approved', 'rejected'].includes(status)) {
+      res.status(400).json({ error: 'status must be pending, approved or rejected' });
+      return;
+    }
+    const result = await AttendanceService.listCorrectionRequests(status);
+    res.json({ requests: result });
+  } catch (err) { next(err); }
+});
+
+router.patch('/correction-requests/:id', requireRole('director', 'hr'), requireUuid('id'), validate(reviewCorrectionRequestSchema), async (req: Request, res: Response, next) => {
+  try {
+    const result = await AttendanceService.reviewCorrectionRequest(String(req.params.id!), req.body.status, req.user!.sub, req.body.comment);
+    res.json(result);
   } catch (err) { next(err); }
 });
 

@@ -3,16 +3,16 @@ import db from '../db/index.js';
 import { ensureAdminBootstrap } from '../db/bootstrap.js';
 
 describe('database migrations', () => {
-  it('applies all 21 migrations in order', async () => {
+  it('applies all 22 migrations in order', async () => {
     const rows = (await db.prepare('SELECT version FROM schema_migrations ORDER BY version').all()) as any[];
     const versions = rows.map((r) => Number(r.version));
-    expect(versions).toEqual(Array.from({ length: 21 }, (_, i) => i + 1));
+    expect(versions).toEqual(Array.from({ length: 22 }, (_, i) => i + 1));
   });
 
   it('creates all core tables', async () => {
     const rows = (await db.prepare('SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = ?').all('BASE TABLE')) as any[];
     const names = new Set(rows.map((r) => r.name));
-    for (const t of ['users', 'roles', 'attendance', 'leaves', 'tasks', 'notifications', 'documents', 'holidays', 'activity_logs']) {
+    for (const t of ['users', 'roles', 'attendance', 'attendance_correction_requests', 'leaves', 'tasks', 'notifications', 'documents', 'holidays', 'activity_logs']) {
       // documents table may be named document_requests
       if (t === 'documents') {
         expect(names.has('document_requests') || names.has('documents')).toBe(true);
@@ -40,9 +40,10 @@ describe('database migrations', () => {
     // migration looked applied forever and this file could never catch it.
     const rows = (await db.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all()) as any[];
     const versions = rows.map((r) => Number(r.version));
-    expect(versions).toEqual(expect.arrayContaining([1, 21]));
+    expect(versions).toEqual(expect.arrayContaining([1, 22]));
     expect(versions.every((v) => Number.isInteger(v) && v > 0)).toBe(true);
     expect(new Set(versions).size).toBe(versions.length);
   });
 });
+
 

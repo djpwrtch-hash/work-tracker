@@ -35,8 +35,13 @@ export class PlansService {
     const offset = (page - 1) * limit;
     const conds: string[] = []; const params: any[] = [];
 
-    if (role === 'employee') { conds.push('wp.user_id = ?'); params.push(userId); }
-    else if (filterUserId) { conds.push('wp.user_id = ?'); params.push(filterUserId); }
+    if (role === 'employee') {
+      conds.push('wp.user_id = ?');
+      params.push(userId);
+    } else {
+      if (filterUserId) { conds.push('wp.user_id = ?'); params.push(filterUserId); }
+      if (!status) { conds.push("wp.status != 'draft'"); }
+    }
     if (status) { conds.push('wp.status = ?'); params.push(status); }
     if (startDate) { conds.push('wp.date >= ?'); params.push(startDate); }
     if (endDate) { conds.push('wp.date <= ?'); params.push(endDate); }

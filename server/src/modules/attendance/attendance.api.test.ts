@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import request from 'supertest';
+import { randomUUID } from 'crypto';
 import { app, createUser, loginAs, authHeader } from '../../test/helpers.js';
+import db from '../../db/index.js';
+import { getISTDate, getISTNow } from '../../lib/time.js';
 
 const LOC = {
   latitude: 20.2961,
@@ -66,6 +69,59 @@ describe('POST /api/v1/attendance/check-out', () => {
     const { token } = await loginAs(user.email, 'Password123!');
     const res = await request(app).post('/api/v1/attendance/check-out').set(authHeader(token)).send({});
     expect([400, 404, 409]).toContain(res.status);
+  });
+});
+
+describe('missed check-out correction flow', () => {
+  it('blocks check-in with STALE_ATTENDANCE, auto-sends a permission request on check-out, HR approves, check-in succeeds', async () => {
+    const emp = await createUser({ role: 'employee', password: 'Password123!' });
+    const dir = await createUser({ role: 'director', password: 'Password123!' });
+    const { token } = await loginAs(emp.email, 'Password123!');
+    const { token: dirToken } = await loginAs(dir.email, 'Password123!');
+
+    // employee checked in yesterday and never checked out
+    const istNow = getISTNow();
+    istNow.setUTCDate(istNow.getUTCDate() - 1);
+    const yesterdayStr = istNow.toISOString().split('T')[0]!;
+    const staleId = randomUUID();
+    await db.prepare(
+      'INSERT INTO attendance (id, user_id, date, status, login_time, pause_minutes) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(staleId, emp.id, yesterdayStr, 'present', `${yesterdayStr} 09:00:00`, 0);
+
+    const blocked = await request(app).post('/api/v1/attendance/check-in').set(authHeader(token)).send({});
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error).toBe('STALE_ATTENDANCE');
+
+    const checkout = await request(app).post('/api/v1/attendance/check-out').set(authHeader(token)).send({});
+    expect(checkout.status).toBe(200);
+
+    const mine = await request(app).get('/api/v1/attendance/correction-requests/mine').set(authHeader(token));
+    expect(mine.body.status).toBe('pending');
+    expect(mine.body.staleRecord).toBeNull();
+
+    // check-in is still blocked while approval is pending
+    const stillBlocked = await request(app).post('/api/v1/attendance/check-in').set(authHeader(token)).send({});
+    expect(stillBlocked.status).toBe(409);
+    expect(stillBlocked.body.error).toBe('PENDING_APPROVAL');
+
+    const list = await request(app).get('/api/v1/attendance/correction-requests?status=pending').set(authHeader(dirToken));
+    const req = list.body.requests.find((r: any) => r.userId === emp.id);
+    expect(req).toBeDefined();
+
+    const approved = await request(app).patch(`/api/v1/attendance/correction-requests/${req.id}`).set(authHeader(dirToken)).send({ status: 'approved' });
+    expect(approved.status).toBe(200);
+
+    const checkedIn = await request(app).post('/api/v1/attendance/check-in').set(authHeader(token)).send({});
+    expect(checkedIn.status).toBe(201);
+  });
+
+  it('rejects correction-requests endpoints for employees', async () => {
+    const emp = await createUser({ role: 'employee', password: 'Password123!' });
+    const { token } = await loginAs(emp.email, 'Password123!');
+
+    await request(app).get('/api/v1/attendance/correction-requests').set(authHeader(token)).expect(403);
+    const fakeId = randomUUID();
+    await request(app).patch(`/api/v1/attendance/correction-requests/${fakeId}`).set(authHeader(token)).send({ status: 'approved' }).expect(403);
   });
 });
 

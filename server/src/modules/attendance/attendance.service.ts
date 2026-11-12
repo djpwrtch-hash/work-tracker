@@ -37,6 +37,20 @@ async function logEvent(attendanceId: string, userId: string, eventType: string,
   }
 }
 
+async function notifyAdmins(userId: string, senderId: string, title: string, message: string, type: string, link: string) {
+  try {
+    const admins = await db.prepare(
+      "SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr') AND u.status = 'active'"
+    ).all() as any[];
+    const insertNotif = db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    for (const a of admins) {
+      await insertNotif.run(uuid(), a.id, senderId, title, message, type, link);
+    }
+  } catch (e) {
+    console.error('[Attendance] Notify admins failed:', e);
+  }
+}
+
 export async function getAttendanceEvents(attendanceId: string): Promise<any[]> {
   return await db.prepare(
     "SELECT id, event_type, occurred_at, latitude, longitude, location_accuracy, location_captured_at FROM attendance_events WHERE attendance_id = ? ORDER BY occurred_at ASC"
@@ -70,6 +84,16 @@ export async function getPauseLog(startDate?: string, endDate?: string): Promise
 export class AttendanceService {
   static async checkIn(userId: string, input: { status?: string; notes?: string; latitude?: number; longitude?: number; accuracy?: number; locationCapturedAt?: string }) {
     const today = getISTDate();
+    // A pending correction request (created after closing a missed check-out) blocks check-in until HR/director approves.
+    const pending = await db.prepare("SELECT id FROM attendance_correction_requests WHERE user_id = ? AND status = 'pending' ORDER BY requested_at DESC LIMIT 1").get(userId) as any;
+    if (pending) throw new AppError(409, 'PENDING_APPROVAL');
+
+    // Missed check-out from a previous day blocks check-in until it is closed and approved.
+    const stale = await db.prepare(
+      "SELECT id, date, login_time FROM attendance WHERE user_id = ? AND date < ? AND login_time IS NOT NULL AND logout_time IS NULL ORDER BY date DESC LIMIT 1"
+    ).get(userId, today) as any;
+    if (stale) throw new AppError(409, 'STALE_ATTENDANCE');
+
     const id = uuid();
     const now = new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
     const hasLocation = input.latitude !== undefined && input.longitude !== undefined;
@@ -174,6 +198,7 @@ export class AttendanceService {
   }
 
   static async checkOut(userId: string, input?: { latitude?: number; longitude?: number; accuracy?: number; locationCapturedAt?: string }) {
+    const realToday = getISTDate();
     let today = getISTDate();
     let rec = await db.prepare('SELECT * FROM attendance WHERE user_id = ? AND date = ?').get(userId, today) as any;
     if (!rec) {
@@ -218,9 +243,109 @@ export class AttendanceService {
 
     const updated = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(rec.id);
     logEvent(rec.id, userId, 'check_out', input, nowIso);
+    // Closing a missed (yesterday) check-out automatically sends a permission request to HR/director so the employee can check in today.
+    if (today !== realToday) {
+      await db.prepare(
+        `INSERT INTO attendance_correction_requests (id, user_id, attendance_id, reason, status, requested_at)
+         VALUES (?, ?, ?, 'Missed check-out — permission requested to check in today', 'pending', NOW())`
+      ).run(uuid(), userId, rec.id);
+      await notifyAdmins(userId, userId, 'Permission needed to check in',
+        `An employee forgot to check out on ${rec.date ?? today}. Please review the request to check in today.`,
+        'approval', '/attendance');
+    }
     await invalidateAttendanceCache();
     emitAttendanceUpdated(userId, updated);
     return updated;
+  }
+
+  /** Employee's own latest check-in permission request status (for today) + any missed check-out from a previous day. */
+  static async getMyCorrectionRequest(userId: string) {
+    const row = await db.prepare(
+      `SELECT id, status, reason, review_comment, requested_at, reviewed_at
+       FROM attendance_correction_requests WHERE user_id = ? ORDER BY requested_at DESC LIMIT 1`
+    ).get(userId) as any;
+
+    const today = getISTDate();
+    const stale = await db.prepare(
+      `SELECT id, date, login_time, pause_minutes, pause_start_time FROM attendance
+       WHERE user_id = ? AND date < ? AND login_time IS NOT NULL AND logout_time IS NULL ORDER BY date DESC LIMIT 1`
+    ).get(userId, today) as any;
+
+    let staleInfo: any = null;
+    if (stale) {
+      const loginTime = stale.login_time ? parseUTC(stale.login_time) : new Date();
+      let pauseMinutes = Number(stale.pause_minutes ?? 0) || 0;
+      if (stale.pause_start_time) {
+        pauseMinutes += Math.round((Date.now() - parseUTC(stale.pause_start_time).getTime()) / 60000);
+      }
+      const hoursWorked = Math.max(0, Math.round(((Date.now() - loginTime.getTime()) / 3600000 - pauseMinutes / 60) * 100) / 100);
+      staleInfo = { id: stale.id, date: stale.date, loginTime: stale.login_time, hoursWorked };
+    }
+
+    return { status: row?.status ?? 'none', ...(row ? { reason: row.reason, reviewComment: row.review_comment } : {}), staleRecord: staleInfo };
+  }
+
+  /** HR/director: list correction requests (oldest first so pending are reviewed in order). */
+  static async listCorrectionRequests(status?: string) {
+    const conds: string[] = [];
+    const params: any[] = [];
+    if (status && ['pending', 'approved', 'rejected'].includes(status)) {
+      conds.push('acr.status = ?');
+      params.push(status);
+    }
+    const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
+    const rows = await db.prepare(
+      `SELECT acr.id, acr.user_id, acr.attendance_id, acr.reason, acr.status, acr.requested_at, acr.reviewed_at, acr.review_comment,
+              u.first_name, u.last_name, u.employee_id, u.email,
+              a.date AS attendance_date, a.login_time, a.logout_time
+       FROM attendance_correction_requests acr
+       JOIN users u ON u.id = acr.user_id
+       LEFT JOIN attendance a ON a.id = acr.attendance_id
+       ${where}
+       ORDER BY acr.status = 'pending' DESC, acr.requested_at ASC`
+    ).all(...params) as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      userId: r.user_id,
+      attendanceId: r.attendance_id,
+      reason: r.reason,
+      status: r.status,
+      requestedAt: r.requested_at,
+      reviewedAt: r.reviewed_at,
+      reviewComment: r.review_comment,
+      firstName: r.first_name,
+      lastName: r.last_name,
+      employeeId: r.employee_id,
+      email: r.email,
+      attendanceDate: r.attendance_date,
+      loginTime: r.login_time,
+      logoutTime: r.logout_time,
+    }));
+  }
+
+  /** HR/director: approve or reject a check-in permission request. */
+  static async reviewCorrectionRequest(id: string, status: 'approved' | 'rejected', reviewerId: string, comment?: string) {
+    const request = await db.prepare('SELECT * FROM attendance_correction_requests WHERE id = ?').get(id) as any;
+    if (!request) throw new AppError(404, 'Correction request not found');
+    if (request.status !== 'pending') throw new AppError(409, 'Request already reviewed');
+
+    await db.transaction(async () => {
+      const upd = await db.prepare(
+        `UPDATE attendance_correction_requests SET status = ?, reviewed_by_id = ?, reviewed_at = NOW(), review_comment = ? WHERE id = ? AND status = 'pending'`
+      ).run(status, reviewerId, comment ?? null, id);
+      if (upd.changes === 0) throw new AppError(409, 'Request already reviewed');
+
+      await db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(uuid(), request.user_id, reviewerId,
+          status === 'approved' ? 'Check-in approved' : 'Check-in request rejected',
+          status === 'approved'
+            ? 'Your request to check in today has been approved. You can now check in.'
+            : `Your request to check in today was rejected${comment ? `: ${comment}` : ''}.`,
+          status === 'approved' ? 'success' : 'warning', '/attendance');
+    })();
+
+    await invalidateAttendanceCache();
+    return { message: `Correction request ${status}` };
   }
 
   static async list(input: any) {

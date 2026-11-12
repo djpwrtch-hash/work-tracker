@@ -543,6 +543,27 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       await addColumnIfMissing('users', 'must_change_password', 'must_change_password TINYINT NOT NULL DEFAULT 0');
     },
   },
+  {
+    version: 22,
+    name: 'correction-requests',
+    up: async () => {
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS attendance_correction_requests (
+          id VARCHAR(36) PRIMARY KEY,
+          user_id VARCHAR(36) NOT NULL,
+          attendance_id VARCHAR(36),
+          reason VARCHAR(500),
+          status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+          requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          reviewed_by_id VARCHAR(36),
+          reviewed_at DATETIME,
+          review_comment VARCHAR(500),
+          INDEX idx_acr_user_status (user_id, status),
+          INDEX idx_acr_status (status)
+        )
+      `);
+    },
+  },
 ];
 
 await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (

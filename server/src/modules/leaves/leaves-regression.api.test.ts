@@ -64,6 +64,7 @@ describe('leave date handling (regression)', () => {
     const employeeToken = (await loginAs(employee.email, 'Password123!')).token;
 
     const id = await applyLeave(employeeToken, 50, 52);
+    const leaveYear = Number(futureDate(50).slice(0, 4));
 
     // This is the request that used to 500 with "Unknown column 'NaN' in 'where clause'".
     const approved = await request(app)
@@ -73,7 +74,9 @@ describe('leave date handling (regression)', () => {
     expect(approved.status).toBe(200);
     expect(approved.body.status).toBe('approved');
 
-    const balance = await request(app).get('/api/v1/leaves/balance').set(authHeader(employeeToken));
+    // Check the balance for the year the leave was taken in (futureDate crosses a
+    // calendar-year boundary in Nov/Dec, so the current-year balance may be 0).
+    const balance = await request(app).get(`/api/v1/leaves/balance?year=${leaveYear}`).set(authHeader(employeeToken));
     expect(balance.status).toBe(200);
     // The balance is derived from the leave year, so a broken year would surface here.
     expect(Number(balance.body.totalUsed)).toBeGreaterThan(0);
