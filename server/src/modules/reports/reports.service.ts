@@ -21,8 +21,16 @@ export class ReportsService {
     if (existing) throw new AppError(409, 'Report already exists for this date');
     const id = uuid();
     try {
-      await db.prepare('INSERT INTO work_reports (id, user_id, date, work_completed_today, current_progress, pending_work, blockers, tomorrow_plan, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(id, userId, date, input.workCompletedToday, input.currentProgress ?? 0, input.pendingWork ?? null, input.blockers ?? null, input.tomorrowPlan ?? null, 'draft');
+      await db.transaction(async () => {
+        await db.prepare('INSERT INTO work_reports (id, user_id, date, work_completed_today, current_progress, pending_work, blockers, tomorrow_plan, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(id, userId, date, input.workCompletedToday, input.currentProgress ?? 0, input.pendingWork ?? null, input.blockers ?? null, input.tomorrowPlan ?? null, 'submitted');
+
+        const admins = await db.prepare("SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr')").all() as any[];
+        const insertNotif = db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)');
+        for (const a of admins) {
+          await insertNotif.run(uuid(), a.id, userId, 'Report Submitted', `Daily report for ${date} is pending your review`, 'approval', `/reports/${id}`);
+        }
+      })();
     } catch (err: any) {
       if (err?.message?.includes('UNIQUE constraint') || err?.message?.includes('Duplicate entry') || err?.message?.includes('ER_DUP_ENTRY')) throw new AppError(409, 'Report already exists for this date');
       throw err;
@@ -64,7 +72,7 @@ export class ReportsService {
     const report = await db.prepare('SELECT * FROM work_reports WHERE id = ?').get(id) as any;
     if (!report) throw new AppError(404, 'Report not found');
     if (role !== 'director' && role !== 'hr' && report.user_id !== userId) throw new AppError(403, 'Cannot update others report');
-    if (report.status !== 'draft') throw new AppError(409, 'Only draft reports can be updated');
+    if (report.status !== 'draft' && report.status !== 'submitted') throw new AppError(409, 'Only draft or submitted reports can be updated');
     const sets = ["updated_at = NOW()"]; const params: any[] = [];
     if (input.workCompletedToday !== undefined) { sets.push('work_completed_today = ?'); params.push(input.workCompletedToday); }
     if (input.currentProgress !== undefined) { sets.push('current_progress = ?'); params.push(input.currentProgress); }

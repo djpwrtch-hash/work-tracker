@@ -20,8 +20,16 @@ export class PlansService {
     if (existing) throw new AppError(409, 'Plan already exists for this date');
     const id = uuid();
     try {
-      await db.prepare('INSERT INTO work_plans (id, user_id, date, planned_work, priority, estimated_hours, status) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(id, userId, date, input.plannedWork, input.priority ?? 'medium', input.estimatedHours ?? null, 'draft');
+      await db.transaction(async () => {
+        await db.prepare('INSERT INTO work_plans (id, user_id, date, planned_work, priority, estimated_hours, status) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(id, userId, date, input.plannedWork, input.priority ?? 'medium', input.estimatedHours ?? null, 'submitted');
+
+        const admins = await db.prepare("SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr')").all() as any[];
+        const insertNotif = db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)');
+        for (const a of admins) {
+          await insertNotif.run(uuid(), a.id, userId, 'Plan Submitted', `Work plan for ${date} is pending your review`, 'approval', `/plans/${id}`);
+        }
+      })();
     } catch (err: any) {
       if (err?.message?.includes('UNIQUE constraint') || err?.message?.includes('Duplicate entry') || err?.message?.includes('ER_DUP_ENTRY')) throw new AppError(409, 'Plan already exists for this date');
       throw err;
@@ -63,7 +71,7 @@ export class PlansService {
     const plan = await db.prepare('SELECT * FROM work_plans WHERE id = ?').get(id) as any;
     if (!plan) throw new AppError(404, 'Plan not found');
     if (role !== 'director' && role !== 'hr' && plan.user_id !== userId) throw new AppError(403, 'Cannot update others plan');
-    if (plan.status !== 'draft') throw new AppError(409, 'Only draft plans can be updated');
+    if (plan.status !== 'draft' && plan.status !== 'submitted') throw new AppError(409, 'Only draft or submitted plans can be updated');
     await db.prepare("UPDATE work_plans SET planned_work = ?, priority = ?, estimated_hours = ?, updated_at = NOW() WHERE id = ?")
       .run(input.plannedWork ?? plan.planned_work, input.priority ?? plan.priority, input.estimatedHours ?? plan.estimated_hours, id);
     await cache.delContaining('/api/v1/plans');
