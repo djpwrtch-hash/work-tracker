@@ -647,6 +647,14 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       await db.exec("UPDATE work_reports SET submitted_at = (CASE WHEN status = 'submitted' THEN COALESCE(updated_at, created_at) WHEN status IN ('reviewed','approved','rejected') THEN created_at ELSE NULL END) WHERE submitted_at IS NULL");
     },
   },
+  {
+    version: 28,
+    name: 'activity-logs-actor-email',
+    up: async () => {
+      await addColumnIfMissing('activity_logs', 'actor_email', 'actor_email VARCHAR(255) NULL AFTER actor_id');
+      await db.exec("UPDATE activity_logs al LEFT JOIN users u ON al.actor_id = u.id SET al.actor_email = u.email WHERE al.actor_email IS NULL");
+    },
+  },
 ];
 
 await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (

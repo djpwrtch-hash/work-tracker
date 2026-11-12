@@ -203,13 +203,13 @@ export function createApp() {
       ).get() as any;
       const version = Number(migration?.version ?? 0);
       const tableCount = Number(tables?.count ?? 0);
-      if (version < 27 || tableCount < 10) {
+      if (version < 28 || tableCount < 10) {
         res.status(503).json({
           status: 'not ready',
           timestamp,
           checks: {
             database: 'ok',
-            schema: version >= 27 ? 'ok' : `migration ${version}/27`,
+            schema: version >= 28 ? 'ok' : `migration ${version}/28`,
             coreTables: `${tableCount}/10`,
           },
         });

@@ -301,6 +301,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE TABLE IF NOT EXISTS activity_logs (
   id VARCHAR(36) PRIMARY KEY,
   actor_id VARCHAR(36),
+  actor_email VARCHAR(255),
   action VARCHAR(100) NOT NULL,
   entity_type VARCHAR(50) NOT NULL,
   entity_id VARCHAR(36),
