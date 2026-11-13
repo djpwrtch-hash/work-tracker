@@ -154,7 +154,6 @@ describe('extra work flow', () => {
 describe('missed check-out correction flow', () => {
   it('closes a missed check-out even when today already has a checked-out row', async () => {
     const emp = await createUser({ role: 'employee', password: 'Password123!' });
-    const dir = await createUser({ role: 'director', password: 'Password123!' });
     const { token } = await loginAs(emp.email, 'Password123!');
 
     const istNow = getISTNow();
