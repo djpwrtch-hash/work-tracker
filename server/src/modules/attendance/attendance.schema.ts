@@ -6,6 +6,8 @@ const checkInStatuses = ['present', 'remote'] as const;
 
 const dbDatetimeISO = z.string().trim().datetime().transform((v) => v.replace('T', ' ').replace(/\.\d{3}Z$/, ''));
 
+const latLongTogether = (d: { latitude?: number; longitude?: number }) => (d.latitude !== undefined) === (d.longitude !== undefined);
+
 export const checkInSchema = z.object({
   status: z.enum(checkInStatuses).default('present'),
   notes: z.string().trim().optional(),
@@ -13,14 +15,14 @@ export const checkInSchema = z.object({
   longitude: z.number().min(-180).max(180).optional(),
   accuracy: z.number().min(0).optional(),
   locationCapturedAt: dbDatetimeISO.optional(),
-});
+}).refine(latLongTogether, { message: 'latitude and longitude must be provided together', path: ['latitude'] });
 
 export const locationOptionalSchema = z.object({
   latitude: z.number().min(-90).max(90).optional(),
   longitude: z.number().min(-180).max(180).optional(),
   accuracy: z.number().min(0).optional(),
   locationCapturedAt: dbDatetimeISO.optional(),
-});
+}).refine(latLongTogether, { message: 'latitude and longitude must be provided together', path: ['latitude'] });
 
 export const monthlyQuerySchema = z.object({
   year: z.coerce.number().int().min(2020).max(2100).default(new Date().getFullYear()),

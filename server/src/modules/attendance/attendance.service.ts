@@ -135,6 +135,9 @@ export class AttendanceService {
     const id = uuid();
     const now = new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
     const hasLocation = input.latitude !== undefined && input.longitude !== undefined;
+    if (!hasLocation) {
+      console.warn(`[Attendance] Check-in without location for user ${userId}`);
+    }
 
     // Check if record exists (e.g., from approved leave or holiday)
     const existing = await db.prepare('SELECT * FROM attendance WHERE user_id = ? AND date = ?').get(userId, today) as any;
@@ -252,6 +255,9 @@ export class AttendanceService {
     if (!rec) throw new AppError(404, 'No check-in found');
     if (!rec.login_time) throw new AppError(400, 'No check-in found');
     if (rec.logout_time) throw new AppError(409, 'Already checked out today');
+    if (!input?.latitude && !input?.longitude) {
+      console.warn(`[Attendance] Check-out without location for user ${userId}`);
+    }
 
     const now = new Date();
     const nowIso = now.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');

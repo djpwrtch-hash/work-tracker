@@ -14,19 +14,15 @@ export interface CaptureOptions {
   onProgress?: (accuracy: number, success: boolean) => void;
 }
 
-/** Defaults optimized for check-in/check-out use case:
- * - goodAccuracy: 50m (realistic for browser geolocation with high accuracy)
- * - timeoutMs: 15s (high accuracy needs more time on mobile)
- * - maximumAge: 0 (force fresh location for check-in)
- * - maxAttempts: 3 (try up to 3 times for better accuracy)
- */
+/** Defaults optimized for check-in/check-out use case. */
 const DEFAULT_GOOD_ACCURACY = 50;
-const DEFAULT_TIMEOUT_MS = 15000;
-const DEFAULT_MAXIMUM_AGE = 0;
+const DEFAULT_TIMEOUT_MS = 10000;
+const DEFAULT_MAXIMUM_AGE = 30000;
 const DEFAULT_MAX_ATTEMPTS = 3;
+const LOW_ACCURACY_TIMEOUT_MS = 5000;
 
 interface LocationError {
-  code: 'PERMISSION_DENIED' | 'POSITION_UNAVAILABLE' | 'TIMEOUT' | 'sNKNOWN';
+  code: 'PERMISSION_DENIED' | 'POSITION_UNAVAILABLE' | 'TIMEOUT' | 'UNKNOWN';
   message: string;
 }
 
@@ -35,38 +31,45 @@ export interface CaptureResult {
   error: LocationError | null;
 }
 
-export function captureLocation(options: CaptureOptions = {}): Promise<CaptureResult> {
+export async function captureLocation(options: CaptureOptions = {}): Promise<CaptureResult> {
   const goodAccuracy = options.goodAccuracy ?? DEFAULT_GOOD_ACCURACY;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maximumAge = options.maximumAge ?? DEFAULT_MAXIMUM_AGE;
   const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   const onProgress = options.onProgress;
 
-  return new Promise((resolve) => {
-    if (typeof window !== 'undefined' && !window.isSecureContext) {
-      const host = window.location.hostname;
-      const isLocalhost = host === 'localhost' || host === '127.0.0.1' || host === '::1';
-      const isLanIp = /^\d+\.\d+\.\d+\.\d+$/.test(host) || host.endsWith('.local');
-      let msg = 'Location requires HTTPS. Please use https:// or localhost.';
-      if (isLanIp && !isLocalhost) {
-        msg = `Location blocked: ${host} is not a secure context. Use http://localhost:42780 on this device, or run "npm run dev:https" and trust the self-signed cert (web/certs/) for LAN HTTPS.`;
+  // 1. Secure context check
+  if (typeof window !== 'undefined' && !window.isSecureContext) {
+    const host = window.location.hostname;
+    const isLocalhost = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+    const isLanIp = /^\d+\.\d+\.\d+\.\d+$/.test(host) || host.endsWith('.local');
+    let msg = 'Location requires HTTPS. Please use https:// or localhost.';
+    if (isLanIp && !isLocalhost) {
+      msg = `Location blocked: ${host} is not a secure context. Use http://localhost:42780 on this device, or run "npm run dev:https".`;
+    }
+    console.warn('[Location] Not a secure context —', host);
+    return { location: null, error: { code: 'PERMISSION_DENIED', message: msg } };
+  }
+  if (typeof window === 'undefined' || !('geolocation' in navigator)) {
+    return { location: null, error: { code: 'UNKNOWN', message: 'Geolocation is not supported by this browser.' } };
+  }
+
+  // 2. Permission pre-check (when supported)
+  if (navigator.permissions && typeof navigator.permissions.query === 'function') {
+    try {
+      const perm = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
+      if (perm.state === 'denied') {
+        return { location: null, error: { code: 'PERMISSION_DENIED', message: 'Location permission denied. Enable it in your browser settings, then retry.' } };
       }
-      console.warn('[Location] Not a secure context —', host, isLanIp ? '(LAN IP)' : '');
-      resolve({ location: null, error: { code: 'PERMISSION_DENIED', message: msg } });
-      return;
+      // 'prompt' or 'granted' → proceed (browser will show the prompt if needed)
+    } catch {
+      // Permissions API unavailable/unreliable — fall through to getCurrentPosition
     }
-    if (typeof window === 'undefined' || !('geolocation' in navigator)) {
-      console.warn('[Location] Geolocation not available (server or unsupported browser)');
-      resolve({ location: null, error: { code: 'sNKNOWN', message: 'Geolocation not supported' } });
-      return;
-    }
+  }
 
-    let best: BestLocation | null = null;
-    let attempts = 0;
-
-    const attempt = () => {
-      attempts++;
-
+  // 3. Helper to run one getCurrentPosition attempt
+  const runAttempt = (enableHighAccuracy: boolean, timeout: number): Promise<{ candidate: BestLocation | null; error: LocationError | null }> => {
+    return new Promise((resolve) => {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const candidate: BestLocation = {
@@ -76,80 +79,74 @@ export function captureLocation(options: CaptureOptions = {}): Promise<CaptureRe
             locationCapturedAt: new Date().toISOString(),
             success: true,
           };
-
-          // Keep the best (most accurate) reading
-          if (!best || candidate.accuracy < best.accuracy) {
-            best = candidate;
-          }
-
-          onProgress?.(best.accuracy, best.success);
-
-          // If accuracy is good enough, resolve immediately
-          if (best.accuracy <= goodAccuracy) {
-            resolve({ location: best, error: null });
-            return;
-          }
-
-          // If we have more attempts, try again for better accuracy
-          if (attempts < maxAttempts) {
-            setTimeout(attempt, 100);
-          } else {
-            // No more attempts, resolve with best we have
-            resolve({ location: best, error: null });
-          }
+          resolve({ candidate, error: null });
         },
         (err) => {
-          const locationError: LocationError = {
-            code: 'sNKNOWN',
-            message: err.message,
-          };
-
+          const locationError: LocationError = { code: 'UNKNOWN', message: err.message || 'Failed to capture location' };
           if (err.code === err.PERMISSION_DENIED) {
             locationError.code = 'PERMISSION_DENIED';
-            locationError.message = 'Location permission denied. Please enable location access in your browser settings.';
+            locationError.message = 'Location permission denied. Enable it in your browser settings, then retry.';
           } else if (err.code === err.POSITION_UNAVAILABLE) {
             locationError.code = 'POSITION_UNAVAILABLE';
-            locationError.message = 'Location unavailable. Please check your device settings.';
+            locationError.message = 'Location unavailable. Move outdoors or check your device settings.';
           } else if (err.code === err.TIMEOUT) {
             locationError.code = 'TIMEOUT';
             locationError.message = 'Location request timed out. Please try again.';
           }
-
           console.error('[Location] Geolocation error:', locationError.code, locationError.message);
-
-          // Retry on TIMEOUT, fail fast on PERMISSION_DENIED
-          if (locationError.code === 'TIMEOUT' && attempts < maxAttempts) {
-            setTimeout(attempt, 500);
-            return;
-          }
-          if (locationError.code === 'POSITION_UNAVAILABLE' && attempts < maxAttempts && !best) {
-            setTimeout(attempt, 500);
-            return;
-          }
-
-          // If we have a previous best reading, use it
-          if (best) {
-            resolve({ location: best, error: locationError });
-          } else {
-            resolve({ location: null, error: locationError });
-          }
+          resolve({ candidate: null, error: locationError });
         },
-        {
-          enableHighAccuracy: true,
-          timeout: timeoutMs,
-          maximumAge: maximumAge,
-        }
+        { enableHighAccuracy, timeout, maximumAge }
       );
-    };
+    });
+  };
 
-    // Start the first attempt
-    attempt();
-  });
+  // 4. Phase 1: high accuracy (up to maxAttempts)
+  let best: BestLocation | null = null;
+  let lastError: LocationError | null = null;
+
+  for (let i = 0; i < maxAttempts; i++) {
+    const { candidate, error } = await runAttempt(true, timeoutMs);
+    if (candidate) {
+      if (!best || candidate.accuracy < best.accuracy) best = candidate;
+      onProgress?.(best.accuracy, true);
+      if (best.accuracy <= goodAccuracy) {
+        return { location: best, error: null };
+      }
+    } else if (error) {
+      lastError = error;
+      if (error.code === 'PERMISSION_DENIED') {
+        // Fail fast on permission denial — no point retrying
+        return { location: null, error };
+      }
+      // TIMEOUT / POSITION_UNAVAILABLE → try next attempt
+    }
+    if (i < maxAttempts - 1) await new Promise((r) => setTimeout(r, 200));
+  }
+
+  // 5. Phase 2: fallback to low accuracy (Wi-Fi/IP) if no good reading
+  if (!best || best.accuracy > goodAccuracy) {
+    const { candidate, error } = await runAttempt(false, LOW_ACCURACY_TIMEOUT_MS);
+    if (candidate) {
+      if (!best || candidate.accuracy < best.accuracy) best = candidate;
+      onProgress?.(best.accuracy, true);
+    } else if (error) {
+      lastError = error;
+      if (error.code === 'PERMISSION_DENIED') {
+        return { location: null, error };
+      }
+    }
+  }
+
+  if (best) {
+    return { location: best, error: null };
+  }
+  return { location: null, error: lastError ?? { code: 'UNKNOWN', message: 'Failed to capture location' } };
 }
 
 /** Helper to get a user-friendly error message from a location result */
 export function getLocationErrorMessage(err: unknown): string {
-  if (!err) return 'snknown location error';
+  if (!err) return 'Unknown location error';
   if (typeof err === 'string') return err;
   if (err instanceof Error) return err.message;
   const e = err as LocationError;

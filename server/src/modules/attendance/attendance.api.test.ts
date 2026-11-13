@@ -48,6 +48,16 @@ describe('POST /api/v1/attendance/check-in', () => {
       .send({ status: 'present', latitude: 999, longitude: 10 });
     expect(res.status).toBe(400);
   });
+
+  it('rejects latitude without longitude with 400', async () => {
+    const user = await createUser({ password: 'Password123!' });
+    const { token } = await loginAs(user.email, 'Password123!');
+    const res = await request(app)
+      .post('/api/v1/attendance/check-in')
+      .set(authHeader(token))
+      .send({ status: 'present', latitude: 20.2961 });
+    expect(res.status).toBe(400);
+  });
 });
 
 describe('POST /api/v1/attendance/check-out', () => {

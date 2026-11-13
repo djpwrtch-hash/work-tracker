@@ -8,7 +8,7 @@ import { captureLocation, getLocationErrorMessage } from '@/lib/location';
 import { useNow } from '@/lib/useNow';
 import { formatDate, statusColor, dayTypeLabel, DAY_HOURS, parseServerTime, formatISTTime, IST_TIMEZONE } from '@/lib/utils';
 import { useState, useEffect, useMemo, useCallback, Fragment } from 'react';
-import { LogIn, LogOut, Play, Loader2, Clock, Coffee, Download, History, Trash2, ChevronDown, ChevronRight, Pencil } from 'lucide-react';
+import { LogIn, LogOut, Play, Loader2, Clock, Coffee, Download, History, Trash2, ChevronDown, ChevronRight, Pencil, MapPin } from 'lucide-react';
 import { dynamic } from '@/lib/dynamic';
 import type { ExportColumn, ExportExtraSection } from '@/components/ExportDialog';
 import ResponsiveTable, { type Column } from '@/components/ResponsiveTable';
@@ -523,7 +523,6 @@ export default function AttendancePage() {
 
   const [attError, setAttError] = useState('');
   const [gettingLocation, setGettingLocation] = useState(false);
-  const [locationProgress, setLocationProgress] = useState<number | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteText, setDeleteText] = useState('');
@@ -615,44 +614,79 @@ export default function AttendancePage() {
   });
 
   const handleCheckOut = async () => {
-    setGettingLocation(true);
-    setLocationProgress(null);
     setLocationError(null);
+    // Start the capture here so the user gesture is preserved for the permission prompt,
+    // and let the API call proceed in parallel — check-out never waits for GPS.
+    const capturePromise = captureLocation({ maxAttempts: 5, timeoutMs: 10000 });
     try {
-      const result = await captureLocation({ onProgress: setLocationProgress });
-      const loc = (result as any)?.location !== undefined ? (result as any).location : (result as any);
-      const err = (result as any)?.error ?? null;
-      if (!loc) {
-        setLocationError(`${err ? getLocationErrorMessage(err) : 'Location capture failed.'} Check-out will proceed without location.`);
-      }
-      checkOut.mutate(loc ?? null);
-    } catch (e) {
-      setLocationError(`${getLocationErrorMessage(e)} Check-out will proceed without location.`);
-      checkOut.mutate(null);
-    } finally {
-      setGettingLocation(false);
-      setLocationProgress(null);
+      const record = await checkOut.mutateAsync(null);
+      toast.success('Checked out');
+      void attachLocation(record, capturePromise);
+    } catch {
+      // mutation onError already showed the toast
+      void 0;
     }
   };
 
   const handleCheckIn = async () => {
-    setGettingLocation(true);
-    setLocationProgress(null);
     setLocationError(null);
+    const capturePromise = captureLocation({ maxAttempts: 5, timeoutMs: 10000 });
     try {
-      const result = await captureLocation({ onProgress: setLocationProgress });
-      const loc = (result as any)?.location !== undefined ? (result as any).location : (result as any);
-      const err = (result as any)?.error ?? null;
-      if (!loc) {
-        setLocationError(`${err ? getLocationErrorMessage(err) : 'Location capture failed.'} Check-in will proceed without location.`);
+      const record = await checkIn.mutateAsync(null);
+      toast.success('Checked in');
+      void attachLocation(record, capturePromise);
+    } catch {
+      void 0;
+    }
+  };
+
+  const attachLocation = async (record: any, capturePromise: Promise<any>) => {
+    try {
+      const result = await capturePromise;
+      if (result.location && record?.id) {
+        await api.patch(`/attendance/${record.id}`, {
+          latitude: result.location.latitude,
+          longitude: result.location.longitude,
+          accuracy: result.location.accuracy,
+          locationCapturedAt: result.location.locationCapturedAt,
+        });
+        void qc.invalidateQueries({ queryKey: ['todayAtt'] });
+        toast.success(`Location captured (±${result.location.accuracy} m)`);
+      } else if (result.error) {
+        setLocationError(`${getLocationErrorMessage(result.error)} Location not saved.`);
       }
-      checkIn.mutate(loc ?? null);
-    } catch (e) {
-      setLocationError(`${getLocationErrorMessage(e)} Check-in will proceed without location.`);
-      checkIn.mutate(null);
+    } catch (e: any) {
+      toast.error(getApiError(e, 'Failed to save location'));
+    } finally {
+      void 0;
+    }
+  };
+
+  const handleRetryLocation = async () => {
+    const recId = (today as any)?.id;
+    if (!recId) { toast.error('No attendance record to attach location to'); return; }
+    setLocationError(null);
+    setGettingLocation(true);
+    try {
+      const result = await captureLocation({ maxAttempts: 5, timeoutMs: 10000 });
+      if (result.location) {
+        await api.patch(`/attendance/${recId}`, {
+          latitude: result.location.latitude,
+          longitude: result.location.longitude,
+          accuracy: result.location.accuracy,
+          locationCapturedAt: result.location.locationCapturedAt,
+        });
+        void qc.invalidateQueries({ queryKey: ['todayAtt'] });
+        toast.success(`Location captured (±${result.location.accuracy} m)`);
+      } else if (result.error) {
+        setLocationError(`${getLocationErrorMessage(result.error)} Location not saved.`);
+        toast.error(getLocationErrorMessage(result.error));
+      }
+    } catch (e: any) {
+      toast.error(getApiError(e, 'Failed to save location'));
     } finally {
       setGettingLocation(false);
-      setLocationProgress(null);
+      void 0;
     }
   };
 
@@ -789,7 +823,15 @@ export default function AttendancePage() {
               </div>
               <div>
                 <p className="text-xs text-slate-400">Location</p>
-                <p className="text-sm text-white mt-1"><LocationCell latitude={today.latitude} longitude={today.longitude} /></p>
+                <div className="flex items-center gap-2 mt-1">
+                  <p className="text-sm text-white"><LocationCell latitude={today.latitude} longitude={today.longitude} /></p>
+                  {today.latitude == null && (
+                    <button onClick={() => handleRetryLocation()} disabled={gettingLocation}
+                      className="flex items-center gap-1 rounded-lg border border-violet-500/40 text-violet-300 hover:bg-violet-500/10 px-2 py-1 text-[10px] font-medium transition disabled:opacity-50 whitespace-nowrap">
+                      {gettingLocation ? <Loader2 className="h-3 w-3 animate-spin" /> : <MapPin className="h-3 w-3" />}Retry location
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
             {/* Action Buttons */}
@@ -800,9 +842,9 @@ export default function AttendancePage() {
                     className="flex items-center gap-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 text-sm font-semibold transition disabled:opacity-50">
                     {startPause.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Coffee className="h-4 w-4" />}Pause
                   </button>
-                  <button onClick={() => handleCheckOut()} disabled={checkOut.isPending || gettingLocation}
+                  <button onClick={() => handleCheckOut()} disabled={checkOut.isPending}
                     className="flex items-center gap-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 text-sm font-semibold transition disabled:opacity-50">
-                    {checkOut.isPending || gettingLocation ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}{gettingLocation ? (locationProgress !== null ? `Improving accuracy… ${locationProgress}m` : 'Getting location…') : 'Check Out'}
+                    {checkOut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}Check Out
                   </button>
                 </>
               )}
@@ -861,7 +903,7 @@ export default function AttendancePage() {
               <p className="text-sm font-semibold text-amber-400">Missed check-out</p>
               <p className="text-xs text-amber-400/80 mt-1">You were active from {formatExactTime(correctionRequest.staleRecord.loginTime)} on {formatDate(correctionRequest.staleRecord.date)}. Worked ~{correctionRequest.staleRecord.hoursWorked}h. Close it to request approval to check in today.</p>
             </div>
-            <button onClick={() => handleCheckOut()} disabled={checkOut.isPending || gettingLocation} className="flex items-center gap-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white px-4 py-2.5 text-sm font-semibold transition disabled:opacity-50 whitespace-nowrap">
+            <button onClick={() => handleCheckOut()} disabled={checkOut.isPending} className="flex items-center gap-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white px-4 py-2.5 text-sm font-semibold transition disabled:opacity-50 whitespace-nowrap">
               {checkOut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}Close check-out
             </button>
           </div>
@@ -884,9 +926,9 @@ export default function AttendancePage() {
 
         {!todayLoading && correctionRequest && !correctionRequest.staleRecord && correctionRequest.status !== 'pending' && (!today || (!today.logout_time && ['leave', 'holiday', 'absent'].includes(today.status))) && (
           <div>
-            <button onClick={handleCheckIn} disabled={checkIn.isPending || gettingLocation}
+            <button onClick={handleCheckIn} disabled={checkIn.isPending}
               className="flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 text-sm font-semibold transition disabled:opacity-50">
-              {(checkIn.isPending || gettingLocation) ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}{gettingLocation ? (locationProgress !== null ? `Improving accuracy… ${locationProgress}m` : 'Getting location…') : 'Check In'}
+              {checkIn.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}Check In
             </button>
             {locationError && (
               <p className="mt-2 text-xs text-amber-400/80">{locationError}</p>
