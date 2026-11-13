@@ -152,6 +152,40 @@ describe('extra work flow', () => {
 });
 
 describe('missed check-out correction flow', () => {
+  it('closes a missed check-out even when today already has a checked-out row', async () => {
+    const emp = await createUser({ role: 'employee', password: 'Password123!' });
+    const dir = await createUser({ role: 'director', password: 'Password123!' });
+    const { token } = await loginAs(emp.email, 'Password123!');
+
+    const istNow = getISTNow();
+    istNow.setUTCDate(istNow.getUTCDate() - 1);
+    const yesterdayStr = istNow.toISOString().split('T')[0]!;
+    const todayStr = getISTNow().toISOString().split('T')[0]!;
+
+    // missed check-out from yesterday, still open
+    const staleId = randomUUID();
+    await db.prepare(
+      'INSERT INTO attendance (id, user_id, date, status, login_time, pause_minutes) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(staleId, emp.id, yesterdayStr, 'present', `${yesterdayStr} 09:00:00`, 0);
+
+    // today already exists and is already checked out
+    const todayId = randomUUID();
+    await db.prepare(
+      'INSERT INTO attendance (id, user_id, date, status, login_time, logout_time, pause_minutes) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(todayId, emp.id, todayStr, 'work_end', `${todayStr} 08:00:00`, `${todayStr} 17:00:00`, 0);
+
+    // closing must succeed and close the stale (yesterday) record, not hit today's row
+    const checkout = await request(app).post('/api/v1/attendance/check-out').set(authHeader(token)).send({});
+    expect(checkout.status).toBe(200);
+
+    const stale = await db.prepare('SELECT logout_time FROM attendance WHERE id = ?').get(staleId) as any;
+    expect(stale.logout_time).not.toBeNull();
+
+    const mine = await request(app).get('/api/v1/attendance/correction-requests/mine').set(authHeader(token));
+    expect(mine.body.status).toBe('pending');
+    expect(mine.body.staleRecord).toBeNull();
+  });
+
   it('blocks check-in with STALE_ATTENDANCE, auto-sends a permission request on check-out, HR approves, check-in succeeds', async () => {
     const emp = await createUser({ role: 'employee', password: 'Password123!' });
     const dir = await createUser({ role: 'director', password: 'Password123!' });

@@ -238,13 +238,16 @@ export class AttendanceService {
   static async checkOut(userId: string, input?: { latitude?: number; longitude?: number; accuracy?: number; locationCapturedAt?: string }) {
     const realToday = getISTDate();
     let today = getISTDate();
-    let rec = await db.prepare('SELECT * FROM attendance WHERE user_id = ? AND date = ?').get(userId, today) as any;
-    if (!rec) {
-      const istNow = getISTNow();
-      istNow.setUTCDate(istNow.getUTCDate() - 1);
-      const yesterdayStr = istNow.toISOString().split('T')[0]!;
-      rec = await db.prepare('SELECT * FROM attendance WHERE user_id = ? AND date = ?').get(userId, yesterdayStr) as any;
-      if (rec) today = yesterdayStr;
+    // A stale missed check-out (previous day, login_time set, logout_time absent)
+    // takes priority: closing it must not be blocked by a today row that already
+    // exists (absent/leave/holiday, or a fresh check-in).
+    let rec = await db.prepare(
+      "SELECT * FROM attendance WHERE user_id = ? AND date < ? AND login_time IS NOT NULL AND logout_time IS NULL ORDER BY date DESC LIMIT 1"
+    ).get(userId, realToday) as any;
+    if (rec) {
+      today = rec.date;
+    } else {
+      rec = await db.prepare('SELECT * FROM attendance WHERE user_id = ? AND date = ?').get(userId, realToday) as any;
     }
     if (!rec) throw new AppError(404, 'No check-in found');
     if (!rec.login_time) throw new AppError(400, 'No check-in found');
