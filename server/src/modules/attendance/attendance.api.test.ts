@@ -202,6 +202,72 @@ describe('missed check-out correction flow', () => {
     const fakeId = randomUUID();
     await request(app).patch(`/api/v1/attendance/correction-requests/${fakeId}`).set(authHeader(token)).send({ status: 'approved' }).expect(403);
   });
+
+  it('blocks self-review of a forgot-checkout request and lets another admin approve', async () => {
+    const dirA = await createUser({ role: 'director', password: 'Password123!' });
+    const dirB = await createUser({ role: 'director', password: 'Password123!' });
+    const { token: tokenA } = await loginAs(dirA.email, 'Password123!');
+    const { token: tokenB } = await loginAs(dirB.email, 'Password123!');
+
+    const istNow = getISTNow();
+    istNow.setUTCDate(istNow.getUTCDate() - 1);
+    const yesterdayStr = istNow.toISOString().split('T')[0]!;
+    const staleId = randomUUID();
+    await db.prepare(
+      'INSERT INTO attendance (id, user_id, date, status, login_time, pause_minutes) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(staleId, dirA.id, yesterdayStr, 'present', `${yesterdayStr} 09:00:00`, 0);
+
+    const checkout = await request(app).post('/api/v1/attendance/check-out').set(authHeader(tokenA)).send({});
+    expect(checkout.status).toBe(200);
+
+    const mine = await request(app).get('/api/v1/attendance/correction-requests/mine').set(authHeader(tokenA));
+    expect(mine.body.status).toBe('pending'); // another admin exists, so it is not auto-approved
+
+    const list = await request(app).get('/api/v1/attendance/correction-requests?status=pending').set(authHeader(tokenB));
+    const req = list.body.requests.find((r: any) => r.userId === dirA.id);
+    expect(req).toBeDefined();
+
+    // forgetter cannot approve their own request
+    await request(app).patch(`/api/v1/attendance/correction-requests/${req.id}`).set(authHeader(tokenA)).send({ status: 'approved' }).expect(403);
+
+    // a different director can approve
+    const approved = await request(app).patch(`/api/v1/attendance/correction-requests/${req.id}`).set(authHeader(tokenB)).send({ status: 'approved' });
+    expect(approved.status).toBe(200);
+
+    const checkedIn = await request(app).post('/api/v1/attendance/check-in').set(authHeader(tokenA)).send({});
+    expect(checkedIn.status).toBe(201);
+  });
+
+  it('auto-approves the forgot-checkout of the last remaining admin', async () => {
+    const dir = await createUser({ role: 'hr', password: 'Password123!' });
+    const { token } = await loginAs(dir.email, 'Password123!');
+
+    const istNow = getISTNow();
+    istNow.setUTCDate(istNow.getUTCDate() - 1);
+    const yesterdayStr = istNow.toISOString().split('T')[0]!;
+    const staleId = randomUUID();
+    await db.prepare(
+      'INSERT INTO attendance (id, user_id, date, status, login_time, pause_minutes) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(staleId, dir.id, yesterdayStr, 'present', `${yesterdayStr} 09:00:00`, 0);
+
+    const checkout = await request(app).post('/api/v1/attendance/check-out').set(authHeader(token)).send({});
+    expect(checkout.status).toBe(200);
+
+    const others = (await db.prepare(
+      "SELECT COUNT(*) AS c FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr') AND u.status = 'active' AND u.id != ?"
+    ).get(dir.id)) as any;
+    const mine = await request(app).get('/api/v1/attendance/correction-requests/mine').set(authHeader(token));
+
+    if (Number(others?.c ?? 0) === 0) {
+      // no other active admin exists, so the request is auto-approved
+      expect(mine.body.status).toBe('approved');
+      const checkedIn = await request(app).post('/api/v1/attendance/check-in').set(authHeader(token)).send({});
+      expect(checkedIn.status).toBe(201);
+    } else {
+      // other admins exist, so this stays pending and needs an outside reviewer
+      expect(mine.body.status).toBe('pending');
+    }
+  });
 });
 
 describe('POST /api/v1/attendance/pause-start and /pause-end', () => {

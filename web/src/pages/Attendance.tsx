@@ -826,8 +826,14 @@ export default function AttendancePage() {
                     {r.reason && <p className="text-xs text-slate-400 mt-0.5">{r.reason}</p>}
                   </div>
                   <div className="flex gap-2 flex-shrink-0">
-                    <button onClick={() => reviewCorrectionRequest.mutate({ id: r.id, status: 'approved' })} disabled={reviewCorrectionRequest.isPending} className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-xs font-medium transition disabled:opacity-50">Approve</button>
-                    <button onClick={() => reviewCorrectionRequest.mutate({ id: r.id, status: 'rejected' })} disabled={reviewCorrectionRequest.isPending} className="rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 text-xs font-medium transition disabled:opacity-50">Reject</button>
+                    {r.userId === user?.id ? (
+                      <span className="text-xs text-slate-500 italic px-3 py-1.5 whitespace-nowrap">Awaiting another reviewer</span>
+                    ) : (
+                      <>
+                        <button onClick={() => reviewCorrectionRequest.mutate({ id: r.id, status: 'approved' })} disabled={reviewCorrectionRequest.isPending} className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-xs font-medium transition disabled:opacity-50">Approve</button>
+                        <button onClick={() => reviewCorrectionRequest.mutate({ id: r.id, status: 'rejected' })} disabled={reviewCorrectionRequest.isPending} className="rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 text-xs font-medium transition disabled:opacity-50">Reject</button>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}

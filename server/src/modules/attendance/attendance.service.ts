@@ -37,17 +37,38 @@ async function logEvent(attendanceId: string, userId: string, eventType: string,
   }
 }
 
-async function notifyAdmins(userId: string, senderId: string, title: string, message: string, type: string, link: string) {
+async function notifyAdmins(userId: string, senderId: string, title: string, message: string, type: string, link: string, excludeUserId?: string) {
   try {
     const admins = await db.prepare(
       "SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr') AND u.status = 'active'"
     ).all() as any[];
     const insertNotif = db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)');
     for (const a of admins) {
+      if (excludeUserId && a.id === excludeUserId) continue;
       await insertNotif.run(uuid(), a.id, senderId, title, message, type, link);
     }
   } catch (e) {
     console.error('[Attendance] Notify admins failed:', e);
+  }
+}
+
+async function getAccessLevel(userId: string): Promise<string> {
+  try {
+    const r = await db.prepare('SELECT r.access_level FROM users u JOIN roles r ON r.name = u.role WHERE u.id = ?').get(userId) as any;
+    return r?.access_level ?? 'employee';
+  } catch {
+    return 'employee';
+  }
+}
+
+async function countOtherActiveAdmins(userId: string): Promise<number> {
+  try {
+    const r = await db.prepare(
+      "SELECT COUNT(*) AS c FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr') AND u.status = 'active' AND u.id != ?"
+    ).get(userId) as any;
+    return Number(r?.c ?? 0);
+  } catch {
+    return 0;
   }
 }
 
@@ -260,15 +281,35 @@ export class AttendanceService {
 
     const updated = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(rec.id);
     logEvent(rec.id, userId, 'check_out', input, nowIso);
-    // Closing a missed (yesterday) check-out automatically sends a permission request to HR/director so the employee can check in today.
+    // Closing a missed (yesterday) check-out automatically requests permission to check in today.
     if (today !== realToday) {
-      await db.prepare(
-        `INSERT INTO attendance_correction_requests (id, user_id, attendance_id, reason, status, requested_at)
-         VALUES (?, ?, ?, 'Missed check-out — permission requested to check in today', 'pending', NOW())`
-      ).run(uuid(), userId, rec.id);
-      await notifyAdmins(userId, userId, 'Permission needed to check in',
-        `An employee forgot to check out on ${rec.date ?? today}. Please review the request to check in today.`,
-        'approval', '/attendance');
+      const accessLevel = await getAccessLevel(userId);
+      const isAdmin = accessLevel === 'director' || accessLevel === 'hr';
+      const otherAdmins = isAdmin ? await countOtherActiveAdmins(userId) : 0;
+
+      if (isAdmin && otherAdmins === 0) {
+        // Sole admin: auto-approve so they aren't stuck with no one available to review.
+        await db.prepare(
+          `INSERT INTO attendance_correction_requests (id, user_id, attendance_id, reason, status, requested_at, reviewed_by_id, reviewed_at, review_comment)
+           VALUES (?, ?, ?, 'Auto-approved: no other reviewer available', 'approved', NOW(), ?, NOW(), 'Auto-approved: no other reviewer available')`
+        ).run(uuid(), userId, rec.id, userId);
+      } else if (isAdmin) {
+        await db.prepare(
+          `INSERT INTO attendance_correction_requests (id, user_id, attendance_id, reason, status, requested_at)
+           VALUES (?, ?, ?, 'Missed check-out — permission requested to check in today', 'pending', NOW())`
+        ).run(uuid(), userId, rec.id);
+        await notifyAdmins(userId, userId, 'Permission needed to check in',
+          `An HR/Director forgot to check out on ${rec.date ?? today}. Please review the request to check in today.`,
+          'approval', '/attendance', userId);
+      } else {
+        await db.prepare(
+          `INSERT INTO attendance_correction_requests (id, user_id, attendance_id, reason, status, requested_at)
+           VALUES (?, ?, ?, 'Missed check-out — permission requested to check in today', 'pending', NOW())`
+        ).run(uuid(), userId, rec.id);
+        await notifyAdmins(userId, userId, 'Permission needed to check in',
+          `An employee forgot to check out on ${rec.date ?? today}. Please review the request to check in today.`,
+          'approval', '/attendance');
+      }
     }
     await invalidateAttendanceCache();
     emitAttendanceUpdated(userId, updated);
@@ -344,6 +385,7 @@ export class AttendanceService {
   static async reviewCorrectionRequest(id: string, status: 'approved' | 'rejected', reviewerId: string, comment?: string) {
     const request = await db.prepare('SELECT * FROM attendance_correction_requests WHERE id = ?').get(id) as any;
     if (!request) throw new AppError(404, 'Correction request not found');
+    if (request.user_id === reviewerId) throw new AppError(403, 'Cannot review your own correction request');
     if (request.status !== 'pending') throw new AppError(409, 'Request already reviewed');
 
     await db.transaction(async () => {
