@@ -487,9 +487,11 @@ export class AttendanceService {
   }
 
   static async list(input: any) {
-    const { page = 1, limit = 20, userId, userIds, startDate, endDate, status, statuses } = input;
+    const { page = 1, limit = 20, userId, userIds, startDate, endDate, status, statuses, includeHolidays } = input;
     const offset = (page - 1) * limit;
     const conds: string[] = []; const params: any[] = [];
+    const hasExplicitStatusFilter = (!!status && status.length > 0) || (Array.isArray(statuses) && statuses.length > 0);
+    if (!includeHolidays && !hasExplicitStatusFilter) { conds.push("a.status != 'holiday'"); }
     if (userId) { conds.push('a.user_id = ?'); params.push(userId); }
     if (userIds && userIds.length > 0) {
       const placeholders = userIds.map(() => '?').join(',');
@@ -529,15 +531,17 @@ export class AttendanceService {
     return rows;
   }
 
-  static async getUserHistory(userId: string, year: number, month: number, startDate?: string, endDate?: string) {
+  static async getUserHistory(userId: string, year: number, month: number, startDate?: string, endDate?: string, includeHolidays = false) {
     const start = startDate || `${year}-${String(month).padStart(2, '0')}-01`;
     const end = endDate || (() => {
       const lastDay = new Date(year, month, 0).getDate();
       return `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
     })();
 
+    const holidayClause = includeHolidays ? '' : "AND status != 'holiday'";
+
     const records = await db.prepare(`
-      SELECT id, user_id, date, status, login_time, logout_time, working_hours, overtime_hours, pause_start_time, pause_end_time, pause_minutes, latitude, longitude, location_accuracy, location_captured_at, notes, created_at, updated_at FROM attendance WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date DESC
+      SELECT id, user_id, date, status, login_time, logout_time, working_hours, overtime_hours, pause_start_time, pause_end_time, pause_minutes, latitude, longitude, location_accuracy, location_captured_at, notes, created_at, updated_at FROM attendance WHERE user_id = ? AND date >= ? AND date <= ? ${holidayClause} ORDER BY date DESC
     `).all(userId, start, end);
 
     const agg = await db.prepare(`SELECT

@@ -30,6 +30,7 @@ export const monthlyQuerySchema = z.object({
 
 const timeHHMM = z.string().trim().regex(/^\d{1,2}:\d{2}$/, 'Time must be HH:MM');
 const dateYYYYMMDD = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD');
+const booleanQuery = z.preprocess((v) => v === true || v === 'true' || v === 1 || v === '1', z.boolean());
 
 export const createExtraWorkSchema = z.object({
   date: dateYYYYMMDD,
@@ -48,6 +49,7 @@ export const listAttendanceSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   userId: z.string().trim().min(1).optional(),
+  includeHolidays: booleanQuery.optional(),
   userIds: z.preprocess(
     (val) => (val === undefined || val === null ? val : Array.isArray(val) ? val : [val]),
     z.array(z.string().trim().min(1)).optional()

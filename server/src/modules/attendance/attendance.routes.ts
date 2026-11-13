@@ -146,7 +146,8 @@ router.get('/history/:userId', requireRole('director', 'hr'), requireUuid('userI
     const month = Math.min(12, Math.max(1, parseInt(req.query.month as string) || new Date().getMonth() + 1));
     const startDate = req.query.startDate as string | undefined;
     const endDate = req.query.endDate as string | undefined;
-    const result = await AttendanceService.getUserHistory(req.params.userId!, year, month, startDate, endDate);
+    const includeHolidays = req.query.includeHolidays === 'true' || req.query.includeHolidays === '1';
+    const result = await AttendanceService.getUserHistory(req.params.userId!, year, month, startDate, endDate, includeHolidays);
     res.json(result);
   } catch (err) { next(err); }
 });

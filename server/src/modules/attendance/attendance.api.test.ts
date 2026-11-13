@@ -151,6 +151,36 @@ describe('extra work flow', () => {
   });
 });
 
+describe('holiday rows in attendance list', () => {
+  it('excludes holidays by default and includes them with includeHolidays=true', async () => {
+    const emp = await createUser({ role: 'employee', password: 'Password123!' });
+    const dir = await createUser({ role: 'director', password: 'Password123!' });
+    const { token: dirToken } = await loginAs(dir.email, 'Password123!');
+
+    const today = getISTNow().toISOString().split('T')[0]!;
+    const holidayId = randomUUID();
+    await db.prepare(
+      "INSERT INTO attendance (id, user_id, date, status, pause_minutes) VALUES (?, ?, ?, 'holiday', 0)"
+    ).run(holidayId, emp.id, today);
+
+    // default list excludes the holiday row
+    const def = await request(app).get('/api/v1/attendance?limit=50').set(authHeader(dirToken));
+    expect(def.status).toBe(200);
+    const defHoliday = (def.body.records ?? []).find((r: any) => r.status === 'holiday');
+    expect(defHoliday).toBeUndefined();
+
+    // explicit includeHolidays=true returns it
+    const inc = await request(app).get('/api/v1/attendance?limit=50&includeHolidays=true').set(authHeader(dirToken));
+    const incHoliday = (inc.body.records ?? []).find((r: any) => r.status === 'holiday');
+    expect(incHoliday).toBeDefined();
+
+    // filtering by status=holiday also returns it
+    const st = await request(app).get('/api/v1/attendance?limit=50&status=holiday').set(authHeader(dirToken));
+    const stHoliday = (st.body.records ?? []).find((r: any) => r.status === 'holiday');
+    expect(stHoliday).toBeDefined();
+  });
+});
+
 describe('missed check-out correction flow', () => {
   it('closes a missed check-out even when today already has a checked-out row', async () => {
     const emp = await createUser({ role: 'employee', password: 'Password123!' });

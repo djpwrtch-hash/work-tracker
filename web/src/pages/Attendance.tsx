@@ -368,10 +368,12 @@ export default function AttendancePage() {
     enabled: !loading && !!user && isAdmin,
   });
 
+  const [showHolidays, setShowHolidays] = useState(false);
+
   const { data: historyData } = useQuery({
-    queryKey: ['userHistory', historyUser?.id, historyMonth, historyDateRange],
+    queryKey: ['userHistory', historyUser?.id, historyMonth, historyDateRange, showHolidays],
     queryFn: async () => (await api.get(`/attendance/history/${historyUser.id}`, {
-      params: historyDateRange ? { startDate: historyDateRange.start, endDate: historyDateRange.end } : historyMonth,
+      params: { ...(historyDateRange ? { startDate: historyDateRange.start, endDate: historyDateRange.end } : historyMonth), ...(showHolidays ? { includeHolidays: 'true' } : {}) },
     })).data,
     enabled: !loading && !!user && !!historyUser,
   });
@@ -1176,6 +1178,10 @@ export default function AttendancePage() {
                   <button onClick={() => setHistoryDateRange(null)}
                     className="px-2 py-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white text-xs border border-slate-700">Clear</button>
                 )}
+                <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none px-2 py-1 rounded-lg hover:bg-slate-800 transition">
+                  <input type="checkbox" checked={showHolidays} onChange={(e) => setShowHolidays(e.target.checked)} className="rounded border-slate-600" />
+                  Show holidays
+                </label>
               </div>
             </div>
 
