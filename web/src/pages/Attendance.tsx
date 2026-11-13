@@ -6,9 +6,9 @@ import { api, getApiError } from '@/lib/api';
 import { listenOnSocket } from '@/lib/socket';
 import { captureLocation, getLocationErrorMessage } from '@/lib/location';
 import { useNow } from '@/lib/useNow';
-import { formatDate, statusColor, dayTypeLabel, DAY_HOURS, parseServerTime, formatISTTime } from '@/lib/utils';
+import { formatDate, statusColor, dayTypeLabel, DAY_HOURS, parseServerTime, formatISTTime, IST_TIMEZONE } from '@/lib/utils';
 import { useState, useEffect, useMemo, useCallback, Fragment } from 'react';
-import { LogIn, LogOut, Play, Loader2, Clock, Coffee, Download, History, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
+import { LogIn, LogOut, Play, Loader2, Clock, Coffee, Download, History, Trash2, ChevronDown, ChevronRight, Pencil } from 'lucide-react';
 import { dynamic } from '@/lib/dynamic';
 import type { ExportColumn, ExportExtraSection } from '@/components/ExportDialog';
 import ResponsiveTable, { type Column } from '@/components/ResponsiveTable';
@@ -22,6 +22,31 @@ const ExportDialog = dynamic(() => import('@/components/ExportDialog'), { ssr: f
 function formatExactTime(dateString: string | null): string {
   if (!dateString) return '-';
   return formatISTTime(dateString);
+}
+
+const IST_OFFSET = '+05:30';
+
+function dateOnlyOf(v: any): string {
+  if (v == null) return '';
+  if (v instanceof Date) {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`;
+  }
+  const s = String(v);
+  const m = s.match(/\d{4}-\d{2}-\d{2}/);
+  return m ? m[0] : '';
+}
+
+function utcToIstTime(v: any): string {
+  const d = parseServerTime(v);
+  if (!d) return '';
+  return new Intl.DateTimeFormat('en-GB', { timeZone: IST_TIMEZONE, hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+}
+
+function istTimeToUtcIso(dateOnly: string, hhmm: string): string | undefined {
+  if (!dateOnly || !hhmm) return undefined;
+  const d = new Date(`${dateOnly}T${hhmm}:00${IST_OFFSET}`);
+  return isNaN(d.getTime()) ? undefined : d.toISOString();
 }
 
 function formatDuration(hours: number | null): string {
@@ -247,6 +272,63 @@ export default function AttendancePage() {
       qc.invalidateQueries({ queryKey: ['monthlySummary'] });
     },
     onError: (e: any) => toast.error(getApiError(e, 'Failed')),
+  });
+
+  const [editRecord, setEditRecord] = useState<any>(null);
+  const [editForm, setEditForm] = useState({
+    status: 'present',
+    loginTime: '',
+    logoutTime: '',
+    pauseStartTime: '',
+    pauseEndTime: '',
+    workingHours: '',
+    overtimeHours: '',
+    pauseMinutes: '',
+    notes: '',
+  });
+
+  const startEdit = (r: any) => {
+    setEditRecord(r);
+    setEditForm({
+      status: String(r.status ?? 'present'),
+      loginTime: utcToIstTime(r.login_time),
+      logoutTime: utcToIstTime(r.logout_time),
+      pauseStartTime: utcToIstTime(r.pause_start_time),
+      pauseEndTime: utcToIstTime(r.pause_end_time),
+      workingHours: r.working_hours != null ? String(Number(r.working_hours)) : '',
+      overtimeHours: r.overtime_hours != null ? String(Number(r.overtime_hours)) : '',
+      pauseMinutes: r.pause_minutes != null ? String(Number(r.pause_minutes)) : '',
+      notes: String(r.notes ?? ''),
+    });
+  };
+
+  const updateAttendance = useMutation({
+    mutationFn: async () => {
+      if (!editRecord) throw new Error('No record selected');
+      const dateOnly = dateOnlyOf(editRecord.date);
+      const toUtc = (hhmm: string) => istTimeToUtcIso(dateOnly, hhmm);
+      const payload: any = {
+        status: editForm.status,
+        loginTime: toUtc(editForm.loginTime),
+        logoutTime: toUtc(editForm.logoutTime),
+        pauseStartTime: toUtc(editForm.pauseStartTime),
+        pauseEndTime: toUtc(editForm.pauseEndTime),
+        workingHours: editForm.workingHours !== '' ? Number(editForm.workingHours) : undefined,
+        overtimeHours: editForm.overtimeHours !== '' ? Number(editForm.overtimeHours) : undefined,
+        pauseMinutes: editForm.pauseMinutes !== '' ? Number(editForm.pauseMinutes) : undefined,
+        notes: editForm.notes.trim() === '' ? null : editForm.notes.trim(),
+      };
+      // Drop undefined fields (zod treats missing keys via .optional())
+      const clean: any = {};
+      for (const [k, v] of Object.entries(payload)) if (v !== undefined) clean[k] = v;
+      return (await api.patch(`/attendance/${editRecord.id}`, clean)).data;
+    },
+    onSuccess: () => {
+      toast.success('Attendance updated');
+      setEditRecord(null);
+      qc.invalidateQueries({ predicate: (q) => ['attendance', 'todayAtt', 'todayAll', 'monthlySummary'].includes(q.queryKey[0] as string) });
+    },
+    onError: (e: any) => toast.error(getApiError(e, 'Failed to update attendance')),
   });
 
   const liveExtraHours = (() => {
@@ -976,6 +1058,11 @@ export default function AttendancePage() {
               <p className="text-sm text-slate-500">No records</p>
             )
           }
+          actions={isAdmin ? (r: any) => (
+            <button onClick={() => startEdit(r)} aria-label="Edit attendance" title="Edit attendance" className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-xs font-medium">
+              <Pencil className="h-3.5 w-3.5" />Edit
+            </button>
+          ) : undefined}
         />
         {isAdmin && (
           <div className="flex items-center justify-between flex-wrap gap-3 px-4 py-3 border border-slate-800 rounded-2xl bg-slate-900">
@@ -1007,6 +1094,59 @@ export default function AttendancePage() {
         dateField="date"
         extraSections={pauseLogSection ? [pauseLogSection] : undefined}
       />
+
+      {/* Edit Attendance Modal */}
+      <Modal open={!!editRecord} onClose={() => setEditRecord(null)} title={editRecord ? `Edit Attendance — ${dateOnlyOf(editRecord.date)}` : 'Edit Attendance'}>
+        {editRecord && (
+          <div className="space-y-4">
+            <p className="text-xs text-slate-500">{editRecord.first_name} {editRecord.last_name} · {editRecord.employee_id}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Status</label>
+                <select value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white">
+                  {['present', 'on_break', 'work_end', 'absent', 'leave', 'half_day', 'holiday', 'remote'].map((s) => <option key={s} value={s}>{dayTypeLabel(s)}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Working Hours</label>
+                <input type="number" min="0" max="24" step="0.25" value={editForm.workingHours} onChange={(e) => setEditForm({ ...editForm, workingHours: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" placeholder="e.g. 8" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Login (IST)</label>
+                <input type="time" value={editForm.loginTime} onChange={(e) => setEditForm({ ...editForm, loginTime: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Logout (IST)</label>
+                <input type="time" value={editForm.logoutTime} onChange={(e) => setEditForm({ ...editForm, logoutTime: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Pause Start (IST)</label>
+                <input type="time" value={editForm.pauseStartTime} onChange={(e) => setEditForm({ ...editForm, pauseStartTime: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Pause End (IST)</label>
+                <input type="time" value={editForm.pauseEndTime} onChange={(e) => setEditForm({ ...editForm, pauseEndTime: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Overtime Hours</label>
+                <input type="number" min="0" max="24" step="0.25" value={editForm.overtimeHours} onChange={(e) => setEditForm({ ...editForm, overtimeHours: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" placeholder="e.g. 1.5" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Pause Minutes</label>
+                <input type="number" min="0" max="480" step="1" value={editForm.pauseMinutes} onChange={(e) => setEditForm({ ...editForm, pauseMinutes: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" placeholder="e.g. 30" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm text-slate-300 mb-1">Notes</label>
+              <textarea value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} rows={2} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" placeholder="Optional notes" />
+            </div>
+            <button onClick={() => updateAttendance.mutate()} disabled={updateAttendance.isPending}
+              className="w-full rounded-xl bg-violet-600 hover:bg-violet-700 text-white py-2.5 text-sm font-semibold transition disabled:opacity-50 flex items-center justify-center gap-2">
+              {updateAttendance.isPending && <Loader2 className="h-4 w-4 animate-spin" />}Save Changes
+            </button>
+          </div>
+        )}
+      </Modal>
 
       {/* History Modal */}
       <Modal
