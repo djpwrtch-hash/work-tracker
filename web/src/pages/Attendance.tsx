@@ -680,14 +680,19 @@ export default function AttendancePage() {
     try {
       const result = await capturePromise;
       if (result.location && record?.id) {
-        await api.patch(`/attendance/${record.id}`, {
+        const res = await api.patch(`/attendance/${record.id}`, {
           latitude: result.location.latitude,
           longitude: result.location.longitude,
           accuracy: result.location.accuracy,
           locationCapturedAt: result.location.locationCapturedAt,
         });
-        void qc.invalidateQueries({ queryKey: ['todayAtt'] });
+        const updated = res.data;
+        if (updated) {
+          qc.setQueryData(['todayAtt'], (old: any) => (old ? { ...old, ...updated } : { id: record.id, ...updated }));
+        }
         toast.success(`Location captured (±${result.location.accuracy} m)`);
+        void qc.refetchQueries({ queryKey: ['todayAtt'] });
+        void qc.invalidateQueries({ queryKey: ['todayEvents'] });
       } else if (result.error && locationEnabled) {
         setLocationError(`${getLocationErrorMessage(result.error)} Location not saved.`);
       }
@@ -706,13 +711,18 @@ export default function AttendancePage() {
     try {
       const result = await captureLocation({ maxAttempts: 5, timeoutMs: 10000 });
       if (result.location) {
-        await api.patch(`/attendance/${recId}`, {
+        const res = await api.patch(`/attendance/${recId}`, {
           latitude: result.location.latitude,
           longitude: result.location.longitude,
           accuracy: result.location.accuracy,
           locationCapturedAt: result.location.locationCapturedAt,
         });
-        void qc.invalidateQueries({ queryKey: ['todayAtt'] });
+        const updated = res.data;
+        if (updated) {
+          qc.setQueryData(['todayAtt'], (old: any) => (old ? { ...old, ...updated } : { id: recId, ...updated }));
+        }
+        void qc.refetchQueries({ queryKey: ['todayAtt'] });
+        void qc.invalidateQueries({ queryKey: ['todayEvents'] });
         toast.success(`Location captured (±${result.location.accuracy} m)`);
       } else if (result.error) {
         setLocationError(`${getLocationErrorMessage(result.error)} Location not saved.`);
