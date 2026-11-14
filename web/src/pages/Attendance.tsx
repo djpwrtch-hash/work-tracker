@@ -851,7 +851,21 @@ export default function AttendancePage() {
                 </>
               )}
               {locationError && !today.logout_time && (
-                <p className="w-full mt-1 text-xs text-amber-400/80">{locationError}</p>
+                <div className="w-full mt-1 text-xs text-amber-400/80 space-y-1">
+                  <p className="font-medium">{locationError}</p>
+                  {locationError.includes('Location permission denied') && (
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-300">
+                      <p className="font-semibold mb-1">How to re-enable it in Chrome:</p>
+                      <ol className="list-decimal pl-4 space-y-0.5">
+                        <li>Tap the <span className="font-semibold">lock icon</span> in the address bar, left of the site address.</li>
+                        <li>Tap <span className="font-semibold">Site settings</span> → <span className="font-semibold">Location</span>.</li>
+                        <li>Set location to <span className="font-semibold">Allow</span> (it is set to Block).</li>
+                        <li>Tap <span className="font-semibold">Retry location</span> below.</li>
+                      </ol>
+                      <p className="mt-1">If the lock icon isn’t visible, go to Chrome → ⋮ → Settings → Privacy &amp; security → Site settings → Location, find this site and allow it.</p>
+                    </div>
+                  )}
+                </div>
               )}
               {!today.logout_time && isPaused && (
                 <button onClick={() => handleEndPause()} disabled={endPause.isPending || startPause.isPending}
@@ -933,7 +947,21 @@ export default function AttendancePage() {
               {checkIn.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}Check In
             </button>
             {locationError && (
-              <p className="mt-2 text-xs text-amber-400/80">{locationError}</p>
+              <div className="mt-2 text-xs text-amber-400/80 space-y-1">
+                <p className="font-medium">{locationError}</p>
+                {locationError.includes('Location permission denied') && (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-300">
+                    <p className="font-semibold mb-1">How to re-enable it in Chrome:</p>
+                    <ol className="list-decimal pl-4 space-y-0.5">
+                      <li>Tap the <span className="font-semibold">lock icon</span> in the address bar, left of the site address.</li>
+                      <li>Tap <span className="font-semibold">Site settings</span> → <span className="font-semibold">Location</span>.</li>
+                      <li>Set location to <span className="font-semibold">Allow</span>.</li>
+                      <li>Tap <span className="font-semibold">Retry location</span> on the attendance row.</li>
+                    </ol>
+                    <p className="mt-1">If the lock icon isn’t visible: Chrome → ⋮ → Settings → Privacy &amp; security → Site settings → Location → find this site → Allow.</p>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}
