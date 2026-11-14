@@ -7,7 +7,7 @@ import { listenOnSocket } from '@/lib/socket';
 import { captureLocation, getLocationErrorMessage, checkPermissionState } from '@/lib/location';
 import { useNow } from '@/lib/useNow';
 import { formatDate, statusColor, dayTypeLabel, DAY_HOURS, parseServerTime, formatISTTime, IST_TIMEZONE } from '@/lib/utils';
-import { useState, useEffect, useMemo, useCallback, Fragment } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from 'react';
 import { LogIn, LogOut, Play, Loader2, Clock, Coffee, Download, History, Trash2, ChevronDown, ChevronRight, Pencil, MapPin } from 'lucide-react';
 import { dynamic } from '@/lib/dynamic';
 import type { ExportColumn, ExportExtraSection } from '@/components/ExportDialog';
@@ -193,7 +193,8 @@ export default function AttendancePage() {
   useEffect(() => {
     if (permissionState !== 'granted' && permissionState !== 'prompt') return;
     const current = today as any;
-    if (current && !current.latitude) {
+    const effectiveLat = capturedLocation?.latitude ?? current?.latitude;
+    if (current && effectiveLat == null) {
       void handleRetryLocation();
     }
   }, [permissionState]);
@@ -563,10 +564,28 @@ export default function AttendancePage() {
   const [deleteText, setDeleteText] = useState('');
   const [deleteMsg, setDeleteMsg] = useState('');
 
-  // Reset the captured-location override whenever a genuinely new attendance record appears
-  // (e.g. next day's check-in) so it can't leak across days.
-  const todayId = (today as any)?.id;
-  useEffect(() => { setCapturedLocation(null); }, [todayId]);
+  // Reset the captured-location override only when a genuinely new attendance record appears
+  // (new day / new check-in). Transient undefined (refetch/error flicker) is ignored so the
+  // override can't be wiped mid-session.
+  const lastRecordIdRef = useRef<string | null>(null);
+  const todayId = (today as any)?.id ?? null;
+  useEffect(() => {
+    if (todayId && todayId !== lastRecordIdRef.current) {
+      setCapturedLocation(null);
+      lastRecordIdRef.current = todayId;
+    }
+  }, [todayId]);
+
+  // Back-fill the override from the server once coords arrive (e.g. after a refetch hits
+  // the DB). A stale null never clobbers an already-shown coord, and a lost override gets
+  // "upgraded" instead of staying "No location".
+  useEffect(() => {
+    const lat = (today as any)?.latitude;
+    const lng = (today as any)?.longitude;
+    if (typeof lat === 'number' && typeof lng === 'number' && !capturedLocation) {
+      setCapturedLocation({ latitude: lat, longitude: lng });
+    }
+  }, [today?.latitude, today?.longitude, capturedLocation]);
 
   const deleteFiltered = useMutation({
     retry: 0,
