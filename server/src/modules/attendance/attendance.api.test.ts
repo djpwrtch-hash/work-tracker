@@ -384,3 +384,50 @@ describe('POST /api/v1/attendance/pause-start and /pause-end', () => {
     expect(res.body.status).toBe('present');
   });
 });
+
+describe('self-edit of own attendance record', () => {
+  it('lets an employee update location fields on their own record', async () => {
+    const emp = await createUser({ role: 'employee', password: 'Password123!' });
+    const { token } = await loginAs(emp.email, 'Password123!');
+    await request(app).post('/api/v1/attendance/check-in').set(authHeader(token)).send({ status: 'present' });
+
+    const mine = await request(app).get('/api/v1/attendance/today').set(authHeader(token));
+    expect(mine.status).toBe(200);
+    const id = mine.body.id;
+
+    const res = await request(app)
+      .patch(`/api/v1/attendance/${id}`)
+      .set(authHeader(token))
+      .send({ latitude: 20.2961, longitude: 85.8245, accuracy: 50, locationCapturedAt: new Date().toISOString() });
+    expect(res.status).toBe(200);
+    expect(Number(res.body.latitude)).toBeCloseTo(20.2961, 4);
+    expect(Number(res.body.longitude)).toBeCloseTo(85.8245, 4);
+  });
+
+  it('rejects an employee trying to edit status or working hours', async () => {
+    const emp = await createUser({ role: 'employee', password: 'Password123!' });
+    const { token } = await loginAs(emp.email, 'Password123!');
+    await request(app).post('/api/v1/attendance/check-in').set(authHeader(token)).send({ status: 'present' });
+
+    const mine = await request(app).get('/api/v1/attendance/today').set(authHeader(token));
+    const id = mine.body.id;
+
+    const res = await request(app).patch(`/api/v1/attendance/${id}`).set(authHeader(token)).send({ workingHours: 8, status: 'work_end' });
+    expect(res.status).toBe(403);
+  });
+
+  it('blocks an employee from editing another employees attendance', async () => {
+    const empA = await createUser({ role: 'employee', password: 'Password123!' });
+    const empB = await createUser({ role: 'employee', password: 'Password123!' });
+    const { token: tokenA } = await loginAs(empA.email, 'Password123!');
+    const { token: tokenB } = await loginAs(empB.email, 'Password123!');
+    await request(app).post('/api/v1/attendance/check-in').set(authHeader(tokenA)).send({ status: 'present' });
+
+    const mineA = await request(app).get('/api/v1/attendance/today').set(authHeader(tokenA));
+    const id = mineA.body.id;
+
+    // empB tries to PATCH empA's record: rejected because this is empB's session
+    const res = await request(app).patch(`/api/v1/attendance/${id}`).set(authHeader(tokenB)).send({ latitude: 12.34, longitude: 56.78 });
+    expect(res.status).toBe(403);
+  });
+});

@@ -630,27 +630,41 @@ export class AttendanceService {
     return result;
   }
 
-  static async update(id: string, input: any) {
-    if (!await db.prepare('SELECT id FROM attendance WHERE id = ?').get(id)) throw new AppError(404, 'Record not found');
+  static async update(id: string, input: any, userId?: string, accessLevel?: string) {
+    const existing = await db.prepare('SELECT id, user_id FROM attendance WHERE id = ?').get(id) as any;
+    if (!existing) throw new AppError(404, 'Record not found');
+    const isAdmin = accessLevel === 'director' || accessLevel === 'hr';
+
+    // Non-admins may only update their own attendance record, and only location fields.
+    if (!isAdmin) {
+      if (!userId || existing.user_id !== userId) throw new AppError(403, 'Cannot edit attendance of another employee');
+      const allowedForSelf = ['latitude', 'longitude', 'accuracy', 'locationCapturedAt'];
+      const requested = Object.keys(input ?? {}).filter((k) => input[k] !== undefined);
+      const disallowed = requested.filter((k) => !allowedForSelf.includes(k));
+      if (disallowed.length > 0) throw new AppError(403, `Only location fields can be updated by an employee (disallowed: ${disallowed.join(', ')})`);
+    }
+
     const sets: string[] = ["updated_at = NOW()"]; const params: any[] = [];
-    if (input.status) { sets.push('status = ?'); params.push(input.status); }
-    if (input.loginTime) { sets.push('login_time = ?'); params.push(input.loginTime); }
-    if (input.logoutTime) { sets.push('logout_time = ?'); params.push(input.logoutTime); }
-    if (input.workingHours !== undefined) {
+    // Admin-only fields — skip entirely for non-admins
+    const adminOnly = !isAdmin;
+    if (input.status && !adminOnly) { sets.push('status = ?'); params.push(input.status); }
+    if (input.loginTime && !adminOnly) { sets.push('login_time = ?'); params.push(input.loginTime); }
+    if (input.logoutTime && !adminOnly) { sets.push('logout_time = ?'); params.push(input.logoutTime); }
+    if (input.workingHours !== undefined && !adminOnly) {
       if (input.workingHours < 0 || input.workingHours > 24) throw new AppError(400, 'Working hours must be between 0 and 24');
       sets.push('working_hours = ?'); params.push(input.workingHours);
     }
-    if (input.overtimeHours !== undefined) {
+    if (input.overtimeHours !== undefined && !adminOnly) {
       if (input.overtimeHours < 0 || input.overtimeHours > 24) throw new AppError(400, 'Overtime hours must be between 0 and 24');
       sets.push('overtime_hours = ?'); params.push(input.overtimeHours);
     }
-    if (input.pauseStartTime !== undefined) { sets.push('pause_start_time = ?'); params.push(input.pauseStartTime); }
-    if (input.pauseEndTime !== undefined) { sets.push('pause_end_time = ?'); params.push(input.pauseEndTime); }
-    if (input.pauseMinutes !== undefined) {
+    if (input.pauseStartTime !== undefined && !adminOnly) { sets.push('pause_start_time = ?'); params.push(input.pauseStartTime); }
+    if (input.pauseEndTime !== undefined && !adminOnly) { sets.push('pause_end_time = ?'); params.push(input.pauseEndTime); }
+    if (input.pauseMinutes !== undefined && !adminOnly) {
       if (input.pauseMinutes < 0 || input.pauseMinutes > 480) throw new AppError(400, 'Pause minutes must be between 0 and 480');
       sets.push('pause_minutes = ?'); params.push(input.pauseMinutes);
     }
-    if (input.notes !== undefined) { sets.push('notes = ?'); params.push(input.notes); }
+    if (input.notes !== undefined && !adminOnly) { sets.push('notes = ?'); params.push(input.notes); }
     if (input.latitude !== undefined) { sets.push('latitude = ?'); params.push(input.latitude); }
     if (input.longitude !== undefined) { sets.push('longitude = ?'); params.push(input.longitude); }
     if (input.accuracy !== undefined) { sets.push('location_accuracy = ?'); params.push(input.accuracy); }

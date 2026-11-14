@@ -175,9 +175,9 @@ router.get('/', requireRole('director', 'hr'), validate(listAttendanceSchema, 'q
   } catch (err) { next(err); }
 });
 
-router.patch('/:id', requireRole('director', 'hr'), requireUuid('id'), validate(updateAttendanceSchema), async (req: Request, res: Response, next) => {
+router.patch('/:id', authenticate, requireUuid('id'), validate(updateAttendanceSchema), async (req: Request, res: Response, next) => {
   try {
-    const record = await AttendanceService.update(req.params.id!, req.body);
+    const record = await AttendanceService.update(req.params.id!, req.body, req.user!.sub, req.user!.accessLevel);
     res.json(record);
   } catch (err) { next(err); }
 });
