@@ -124,14 +124,17 @@ function mapLink(lat: number, lng: number): string {
   return `https://www.google.com/maps?q=${lat},${lng}`;
 }
 
-function LocationCell({ latitude, longitude }: { latitude?: number | null; longitude?: number | null }) {
-  if (latitude === undefined || latitude === null || longitude === undefined || longitude === null || typeof latitude !== 'number' || typeof longitude !== 'number') {
+function LocationCell({ latitude, longitude }: { latitude?: number | string | null; longitude?: number | string | null }) {
+  // MySQL returns DECIMAL columns as strings over the wire; coerce so they still render.
+  const lat = typeof latitude === 'string' ? Number(latitude) : latitude;
+  const lng = typeof longitude === 'string' ? Number(longitude) : longitude;
+  if (lat === undefined || lat === null || lng === undefined || lng === null || typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng)) {
     return <span className="text-rose-400/80">No location</span>;
   }
   return (
-    <a href={mapLink(latitude, longitude)} target="_blank" rel="noopener noreferrer"
+    <a href={mapLink(lat, lng)} target="_blank" rel="noopener noreferrer"
       className="text-violet-400 hover:text-violet-300 underline decoration-dotted whitespace-nowrap">
-      {latitude.toFixed(5)}, {longitude.toFixed(5)} <span className="text-[10px]">&#8599;</span>
+      {lat.toFixed(5)}, {lng.toFixed(5)} <span className="text-[10px]">&#8599;</span>
     </a>
   );
 }
@@ -580,9 +583,9 @@ export default function AttendancePage() {
   // the DB). A stale null never clobbers an already-shown coord, and a lost override gets
   // "upgraded" instead of staying "No location".
   useEffect(() => {
-    const lat = (today as any)?.latitude;
-    const lng = (today as any)?.longitude;
-    if (typeof lat === 'number' && typeof lng === 'number' && !capturedLocation) {
+    const lat = Number((today as any)?.latitude);
+    const lng = Number((today as any)?.longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lng) && !capturedLocation) {
       setCapturedLocation({ latitude: lat, longitude: lng });
     }
   }, [today?.latitude, today?.longitude, capturedLocation]);
