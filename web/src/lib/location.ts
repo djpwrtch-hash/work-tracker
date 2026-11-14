@@ -31,6 +31,23 @@ export interface CaptureResult {
   error: LocationError | null;
 }
 
+/** Fetch a coarse (~5 km) location via IP geolocation as a last resort fallback. */
+export async function fetchIpLocation(): Promise<BestLocation> {
+  const res = await fetch('https://ipapi.co/json/', { cache: 'no-store' });
+  if (!res.ok) throw new Error(`IP geolocation failed (${res.status})`);
+  const d: any = await res.json();
+  const latitude = Number(d?.latitude);
+  const longitude = Number(d?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) throw new Error('IP geolocation returned no coordinates');
+  return {
+    latitude,
+    longitude,
+    accuracy: 5000,
+    locationCapturedAt: new Date().toISOString(),
+    success: true,
+  };
+}
+
 export async function captureLocation(options: CaptureOptions = {}): Promise<CaptureResult> {
   const goodAccuracy = options.goodAccuracy ?? DEFAULT_GOOD_ACCURACY;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -127,6 +144,17 @@ export async function captureLocation(options: CaptureOptions = {}): Promise<Cap
 
   if (best) {
     return { location: best, error: null };
+  }
+  // Browser geolocation failed entirely — fall back to approximate IP location (~5 km)
+  // so records still get a coarse position. Only when the failure is permission/availability
+  // related (not timeout / no-fix), and only if the device is online.
+  if (lastError && (lastError.code === 'PERMISSION_DENIED' || lastError.code === 'POSITION_UNAVAILABLE')) {
+    try {
+      const ip = await fetchIpLocation();
+      if (ip) return { location: ip, error: null };
+    } catch {
+      // IP lookup failed (offline / blocked) — return the original error
+    }
   }
   return { location: null, error: lastError ?? { code: 'UNKNOWN', message: 'Failed to capture location' } };
 }
