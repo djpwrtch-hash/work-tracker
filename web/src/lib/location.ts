@@ -54,20 +54,7 @@ export async function captureLocation(options: CaptureOptions = {}): Promise<Cap
     return { location: null, error: { code: 'UNKNOWN', message: 'Geolocation is not supported by this browser.' } };
   }
 
-  // 2. Permission pre-check (when supported)
-  if (navigator.permissions && typeof navigator.permissions.query === 'function') {
-    try {
-      const perm = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
-      if (perm.state === 'denied') {
-        return { location: null, error: { code: 'PERMISSION_DENIED', message: 'Location permission denied. Enable it in your browser settings, then retry.' } };
-      }
-      // 'prompt' or 'granted' → proceed (browser will show the prompt if needed)
-    } catch {
-      // Permissions API unavailable/unreliable — fall through to getCurrentPosition
-    }
-  }
-
-  // 3. Helper to run one getCurrentPosition attempt
+  // 2. Helper to run one getCurrentPosition attempt (called synchronously to preserve user gesture)
   const runAttempt = (enableHighAccuracy: boolean, timeout: number): Promise<{ candidate: BestLocation | null; error: LocationError | null }> => {
     return new Promise((resolve) => {
       navigator.geolocation.getCurrentPosition(
@@ -101,7 +88,7 @@ export async function captureLocation(options: CaptureOptions = {}): Promise<Cap
     });
   };
 
-  // 4. Phase 1: high accuracy (up to maxAttempts)
+  // 3. Phase 1: high accuracy (up to maxAttempts)
   let best: BestLocation | null = null;
   let lastError: LocationError | null = null;
 
@@ -124,7 +111,7 @@ export async function captureLocation(options: CaptureOptions = {}): Promise<Cap
     if (i < maxAttempts - 1) await new Promise((r) => setTimeout(r, 200));
   }
 
-  // 5. Phase 2: fallback to low accuracy (Wi-Fi/IP) if no good reading
+  // 4. Phase 2: fallback to low accuracy (Wi-Fi/IP) if no good reading
   if (!best || best.accuracy > goodAccuracy) {
     const { candidate, error } = await runAttempt(false, LOW_ACCURACY_TIMEOUT_MS);
     if (candidate) {
