@@ -673,6 +673,12 @@ export class AttendanceService {
     await db.prepare(`UPDATE attendance SET ${sets.join(', ')} WHERE id = ?`).run(...params);
     await invalidateAttendanceCache();
     const updated = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(id);
+    console.log('[Attendance] PATCH persist check:', {
+      id,
+      inputKeys: Object.keys(input ?? {}),
+      sets,
+      persisted: { latitude: updated?.latitude, longitude: updated?.longitude },
+    });
     emitAttendanceUpdated(existing.user_id, updated);
     return updated;
   }
