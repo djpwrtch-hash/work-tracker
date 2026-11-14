@@ -168,6 +168,8 @@ export default function AttendancePage() {
   const [testResult, setTestResult] = useState<string>('');
   const [manualLat, setManualLat] = useState('');
   const [manualLng, setManualLng] = useState('');
+  const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
+  const isIOS = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
   useEffect(() => {
     let mounted = true;
@@ -825,16 +827,30 @@ export default function AttendancePage() {
             <div className="flex flex-col sm:flex-row sm:items-center gap-4">
               <div className="flex-1">
                 <p className="text-sm font-semibold text-rose-400">Location is blocked for this site</p>
-                <p className="text-xs text-rose-400/80 mt-1">Check-in and check-out will work, but no location will be saved. Tap below to re-enable it.</p>
+                <p className="text-xs text-rose-400/80 mt-1">Check-in and check-out will work, but no location will be saved.</p>
                 <details className="mt-2">
-                  <summary className="cursor-pointer text-xs font-medium text-rose-300 hover:text-rose-200 transition">How to re-enable it in Chrome</summary>
-                  <ol className="list-decimal pl-5 mt-2 space-y-0.5 text-xs text-amber-300">
-                    <li>Tap the <span className="font-semibold">lock icon</span> in the address bar.</li>
-                    <li>Tap <span className="font-semibold">Site settings</span> → <span className="font-semibold">Location</span>.</li>
-                    <li>Set it to <span className="font-semibold">Allow</span>.</li>
-                    <li><span className="font-semibold">Close this tab completely</span> (swipe it away) and reopen it — the permission state is cached in the open tab.</li>
-                  </ol>
-                  <p className="text-xs text-rose-400/60 mt-2">Or: Chrome → ⋮ → Settings → Privacy and security → Site settings → Location → find this site → Allow → <span className="font-semibold">fully close and reopen the tab</span>.</p>
+                  <summary className="cursor-pointer text-xs font-medium text-rose-300 hover:text-rose-200 transition">How to fix this ({isIOS ? 'iOS' : isAndroid ? 'Android' : 'Chrome'})</summary>
+                  {isAndroid ? (
+                    <ol className="list-decimal pl-5 mt-2 space-y-0.5 text-xs text-amber-300">
+                      <li><span className="font-semibold">Android Settings</span> → <span className="font-semibold">Apps</span> → <span className="font-semibold">Chrome</span> → <span className="font-semibold">Permissions</span> → <span className="font-semibold">Location</span>.</li>
+                      <li>Select <span className="font-semibold">Allow all the time</span> or <span className="font-semibold">Allow only while using the app</span>.</li>
+                      <li><span className="font-semibold">Close Chrome completely</span> (swipe away in recent apps) and reopen it.</li>
+                      <li>Return to this page and tap <span className="font-semibold">Retry location</span>.</li>
+                    </ol>
+                  ) : isIOS ? (
+                    <ol className="list-decimal pl-5 mt-2 space-y-0.5 text-xs text-amber-300">
+                      <li><span className="font-semibold">iPhone Settings</span> → <span className="font-semibold">Safari</span> → <span className="font-semibold">Location</span> → <span className="font-semibold">Allow</span>.</li>
+                      <li><span className="font-semibold">Settings</span> → <span className="font-semibold">Privacy &amp; Security</span> → <span className="font-semibold">Location Services</span> → <span className="font-semibold">Safari Websites</span> → Allow.</li>
+                      <li>Return to this page and tap <span className="font-semibold">Retry location</span>.</li>
+                    </ol>
+                  ) : (
+                    <ol className="list-decimal pl-5 mt-2 space-y-0.5 text-xs text-amber-300">
+                      <li>Tap the <span className="font-semibold">lock icon</span> in the address bar.</li>
+                      <li>Tap <span className="font-semibold">Site settings</span> → <span className="font-semibold">Location</span>.</li>
+                      <li>Set it to <span className="font-semibold">Allow</span>.</li>
+                      <li><span className="font-semibold">Close this tab completely</span> and reopen it.</li>
+                    </ol>
+                  )}
                 </details>
               </div>
               <div className="flex flex-col gap-2 flex-shrink-0">
@@ -842,7 +858,7 @@ export default function AttendancePage() {
                   Test my location
                 </button>
                 <button onClick={clearSiteDataAndReload} className="rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 px-4 py-2.5 text-xs font-semibold transition whitespace-nowrap">
-                  Clear site data & reload
+                  Clear site data &amp; reload
                 </button>
               </div>
             </div>
