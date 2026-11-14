@@ -46,6 +46,8 @@ export const updateUserSchema = z.object({
   addressState: z.string().trim().min(2).max(100).optional(),
   addressPincode: z.string().trim().regex(/^\d{6}$/).optional(),
   joiningDate: z.string().trim().datetime().optional(),
+  locationEnabled: z.boolean().optional(),
+  ipEnabled: z.boolean().optional(),
 });
 
 export const listUsersSchema = z.object({

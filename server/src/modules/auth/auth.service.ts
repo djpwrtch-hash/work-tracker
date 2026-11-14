@@ -304,7 +304,7 @@ await db.prepare("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ?
   }
 
   static async getMe(userId: string) {
-    const user = await db.prepare('SELECT id, employee_id, first_name, last_name, email, role, department_id, designation, joining_date, status, phone_number, profile_picture_url, two_factor_enabled, must_change_password FROM users WHERE id = ?').get(userId) as any;
+    const user = await db.prepare('SELECT id, employee_id, first_name, last_name, email, role, department_id, designation, joining_date, status, phone_number, profile_picture_url, two_factor_enabled, must_change_password, location_enabled, ip_enabled FROM users WHERE id = ?').get(userId) as any;
     if (!user) throw new AppError(404, 'User not found');
     return {
       id: user.id, employeeId: user.employee_id, firstName: user.first_name, lastName: user.last_name,
@@ -312,7 +312,18 @@ await db.prepare("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ?
       departmentId: user.department_id, designation: user.designation,
       joiningDate: user.joining_date, status: user.status, phoneNumber: user.phone_number, profilePictureUrl: user.profile_picture_url,
       twoFactorEnabled: !!user.two_factor_enabled, mustChangePassword: !!user.must_change_password,
+      locationEnabled: !!user.location_enabled, ipEnabled: !!user.ip_enabled,
     };
+  }
+
+  static async updatePreferences(userId: string, input: { locationEnabled?: boolean; ipEnabled?: boolean }) {
+    const sets: string[] = ['updated_at = NOW()'];
+    const params: any[] = [];
+    if (input.locationEnabled !== undefined) { sets.push('location_enabled = ?'); params.push(input.locationEnabled ? 1 : 0); }
+    if (input.ipEnabled !== undefined) { sets.push('ip_enabled = ?'); params.push(input.ipEnabled ? 1 : 0); }
+    params.push(userId);
+    await db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+    return this.getMe(userId);
   }
 
   static async forgotPassword(email: string) {

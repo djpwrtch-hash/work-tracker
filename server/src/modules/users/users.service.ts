@@ -30,6 +30,7 @@ function mapUser(u: any) {
     profilePictureUrl: u.profile_picture_url,
     twoFactorEnabled: !!u.two_factor_enabled, lastLoginAt: u.last_login_at,
     mustChangePassword: !!u.must_change_password,
+    locationEnabled: !!u.location_enabled, ipEnabled: !!u.ip_enabled,
     createdAt: u.created_at, updatedAt: u.updated_at,
   };
 }
@@ -52,12 +53,12 @@ export class UsersService {
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const count = (await db.prepare(`SELECT count(*) as c FROM users ${where}`).get(...params) as any).c;
-    const rows = await db.prepare(`SELECT id, employee_id, first_name, last_name, email, role, designation, department_id, status, phone_number, joining_date, dob, gender, father_name, nationality, qualification, address_street, address_city, address_state, address_pincode, profile_picture_url, two_factor_enabled, must_change_password, last_login_at, created_at, updated_at FROM users ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+    const rows = await db.prepare(`SELECT id, employee_id, first_name, last_name, email, role, designation, department_id, status, phone_number, joining_date, dob, gender, father_name, nationality, qualification, address_street, address_city, address_state, address_pincode, profile_picture_url, two_factor_enabled, must_change_password, last_login_at, created_at, updated_at, location_enabled, ip_enabled FROM users ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
     return { users: rows.map(mapUser), total: count, page, limit };
   }
 
   static async getById(id: string) {
-    const u = await db.prepare('SELECT id, employee_id, first_name, last_name, email, role, status, department_id, designation, phone_number, joining_date, dob, gender, father_name, nationality, qualification, address_street, address_city, address_state, address_pincode, profile_picture_url, two_factor_enabled, must_change_password, last_login_at, created_at, updated_at FROM users WHERE id = ?').get(id) as any;
+    const u = await db.prepare('SELECT id, employee_id, first_name, last_name, email, role, status, department_id, designation, phone_number, joining_date, dob, gender, father_name, nationality, qualification, address_street, address_city, address_state, address_pincode, profile_picture_url, two_factor_enabled, must_change_password, last_login_at, created_at, updated_at, location_enabled, ip_enabled FROM users WHERE id = ?').get(id) as any;
     if (!u) throw new AppError(404, 'User not found');
     return mapUser(u);
   }
@@ -107,7 +108,7 @@ export class UsersService {
 
   static async update(id: string, input: UpdateUserInput, requesterAccessLevel?: string) {
     if (!await db.prepare('SELECT id FROM users WHERE id = ?').get(id)) throw new AppError(404, 'User not found');
-    const allowedFields = ['firstName', 'lastName', 'phoneNumber', 'departmentId', 'designation', 'joiningDate', 'status', 'role', 'dob', 'gender', 'fatherName', 'nationality', 'qualification', 'addressStreet', 'addressCity', 'addressState', 'addressPincode'];
+    const allowedFields = ['firstName', 'lastName', 'phoneNumber', 'departmentId', 'designation', 'joiningDate', 'status', 'role', 'dob', 'gender', 'fatherName', 'nationality', 'qualification', 'addressStreet', 'addressCity', 'addressState', 'addressPincode', 'locationEnabled', 'ipEnabled'];
     // Privilege guard: only directors may change role or status (HR would otherwise self-promote)
     const sanitized: Record<string, unknown> = { ...(input as Record<string, unknown>) };
     if (requesterAccessLevel !== 'director') {
@@ -123,7 +124,8 @@ export class UsersService {
       if (v === undefined || !allowedFields.includes(k)) continue;
       const col = k.replace(/([A-Z])/g, '_$1').toLowerCase();
       sets.push(`${col} = ?`);
-      params.push((k === 'joiningDate' || k === 'dob') ? toSQLDate(v) : v);
+      const isBooleanToggle = (k === 'locationEnabled' || k === 'ipEnabled');
+      params.push(isBooleanToggle ? (v ? 1 : 0) : (k === 'joiningDate' || k === 'dob') ? toSQLDate(v) : v);
     }
     params.push(id);
     await db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...params);

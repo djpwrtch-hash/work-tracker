@@ -613,11 +613,13 @@ export default function AttendancePage() {
     onSettled: () => { qc.invalidateQueries({ predicate: (q) => ['todayAtt', 'attendance', 'monthlySummary', 'todayAll', 'todayEvents', 'correctionRequest', 'correctionRequests'].includes(q.queryKey[0] as string) }); },
   });
 
+  const locationEnabled = user?.locationEnabled ?? true;
+
   const handleCheckOut = async () => {
     setLocationError(null);
     // Start the capture here so the user gesture is preserved for the permission prompt,
     // and let the API call proceed in parallel — check-out never waits for GPS.
-    const capturePromise = captureLocation({ maxAttempts: 5, timeoutMs: 10000 });
+    const capturePromise = locationEnabled ? captureLocation({ maxAttempts: 5, timeoutMs: 10000 }) : Promise.resolve({ location: null, error: { code: 'PERMISSION_DENIED', message: 'Location tracking is off in your profile.' } });
     try {
       const record = await checkOut.mutateAsync(null);
       toast.success('Checked out');
@@ -630,7 +632,7 @@ export default function AttendancePage() {
 
   const handleCheckIn = async () => {
     setLocationError(null);
-    const capturePromise = captureLocation({ maxAttempts: 5, timeoutMs: 10000 });
+    const capturePromise = locationEnabled ? captureLocation({ maxAttempts: 5, timeoutMs: 10000 }) : Promise.resolve({ location: null, error: { code: 'PERMISSION_DENIED', message: 'Location tracking is off in your profile.' } });
     try {
       const record = await checkIn.mutateAsync(null);
       toast.success('Checked in');
@@ -652,7 +654,7 @@ export default function AttendancePage() {
         });
         void qc.invalidateQueries({ queryKey: ['todayAtt'] });
         toast.success(`Location captured (±${result.location.accuracy} m)`);
-      } else if (result.error) {
+      } else if (result.error && locationEnabled) {
         setLocationError(`${getLocationErrorMessage(result.error)} Location not saved.`);
       }
     } catch (e: any) {
@@ -825,7 +827,7 @@ export default function AttendancePage() {
                 <p className="text-xs text-slate-400">Location</p>
                 <div className="flex items-center gap-2 mt-1">
                   <p className="text-sm text-white"><LocationCell latitude={today.latitude} longitude={today.longitude} /></p>
-                  {today.latitude == null && (
+                  {today.latitude == null && locationEnabled && (
                     <button onClick={() => handleRetryLocation()} disabled={gettingLocation}
                       className="flex items-center gap-1 rounded-lg border border-violet-500/40 text-violet-300 hover:bg-violet-500/10 px-2 py-1 text-[10px] font-medium transition disabled:opacity-50 whitespace-nowrap">
                       {gettingLocation ? <Loader2 className="h-3 w-3 animate-spin" /> : <MapPin className="h-3 w-3" />}Retry location

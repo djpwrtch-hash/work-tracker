@@ -5,7 +5,7 @@ import { requireRole } from '../../middleware/rbac.js';
 import rateLimit from 'express-rate-limit';
 import { RateLimitStore } from '../../lib/rate-limit-store.js';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service.js';
-import { loginSchema, registerSchema, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema, twoFactorVerifySchema, twoFactorDisableSchema } from './auth.schema.js';
+import { loginSchema, registerSchema, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema, twoFactorVerifySchema, twoFactorDisableSchema, preferencesSchema } from './auth.schema.js';
 import { AuthService } from './auth.service.js';
 import { config } from '../../lib/config.js';
 import { createTOTPSecret, buildTOTPUri } from '../../lib/totp.js';
@@ -113,6 +113,13 @@ router.post('/change-password', authenticate, validate(changePasswordSchema), as
 router.get('/me', authenticate, async (req: Request, res: Response, next) => {
   try {
     const user = await AuthService.getMe(req.user!.sub);
+    res.json(user);
+  } catch (err) { next(err); }
+});
+
+router.patch('/preferences', authenticate, validate(preferencesSchema), async (req: Request, res: Response, next) => {
+  try {
+    const user = await AuthService.updatePreferences(req.user!.sub, req.body);
     res.json(user);
   } catch (err) { next(err); }
 });

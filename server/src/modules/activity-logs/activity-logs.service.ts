@@ -10,16 +10,19 @@ export class ActivityLogsService {
   static async create(userId: string | null, action: string, entityType?: string, entityId?: string, details?: Record<string, any>, ipAddress?: string) {
     const id = uuid();
     let actorEmail: string | null = null;
+    let ipEnabled = true;
     if (userId) {
       try {
-        const u = await db.prepare('SELECT email FROM users WHERE id = ?').get(userId) as any;
+        const u = await db.prepare('SELECT email, ip_enabled FROM users WHERE id = ?').get(userId) as any;
         actorEmail = u?.email ?? null;
+        ipEnabled = u?.ip_enabled === undefined || Number(u.ip_enabled) === 1;
       } catch {
         actorEmail = null;
       }
     }
+    const effectiveIp = ipEnabled ? (ipAddress ?? null) : null;
     await db.prepare('INSERT INTO activity_logs (id, actor_id, actor_email, action, entity_type, entity_id, new_values, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, userId, actorEmail, action, entityType ?? null, entityId ?? null, details ? JSON.stringify(details) : null, ipAddress ?? null);
+      .run(id, userId, actorEmail, action, entityType ?? null, entityId ?? null, details ? JSON.stringify(details) : null, effectiveIp);
     return await this.getById(id);
   }
 

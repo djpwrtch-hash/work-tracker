@@ -20,6 +20,8 @@ interface User {
   joiningDate?: string;
   twoFactorEnabled?: boolean;
   mustChangePassword?: boolean;
+  locationEnabled?: boolean;
+  ipEnabled?: boolean;
 }
 
 interface AuthCtx {

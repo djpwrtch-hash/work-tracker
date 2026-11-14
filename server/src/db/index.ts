@@ -655,6 +655,15 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       await db.exec("UPDATE activity_logs al LEFT JOIN users u ON al.actor_id = u.id SET al.actor_email = u.email WHERE al.actor_email IS NULL");
     },
   },
+  {
+    version: 29,
+    name: 'user-privacy-toggles',
+    up: async () => {
+      await addColumnIfMissing('users', 'location_enabled', 'location_enabled TINYINT(1) NOT NULL DEFAULT 1');
+      await addColumnIfMissing('users', 'ip_enabled', 'ip_enabled TINYINT(1) NOT NULL DEFAULT 1');
+      await db.exec("UPDATE users SET location_enabled = COALESCE(location_enabled, 1), ip_enabled = COALESCE(ip_enabled, 1)");
+    },
+  },
 ];
 
 await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (

@@ -55,6 +55,15 @@ export const twoFactorDisableSchema = z.object({
   currentPassword: z.string().trim().min(1, 'Current password is required'),
 });
 
+export const preferencesSchema = z.object({
+  locationEnabled: z.boolean().optional(),
+  ipEnabled: z.boolean().optional(),
+}).refine((d) => d.locationEnabled !== undefined || d.ipEnabled !== undefined, {
+  message: 'At least one of locationEnabled or ipEnabled must be provided',
+  path: ['locationEnabled'],
+});
+
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+export type PreferencesInput = z.infer<typeof preferencesSchema>;
