@@ -131,6 +131,20 @@ export async function captureLocation(options: CaptureOptions = {}): Promise<Cap
   return { location: null, error: lastError ?? { code: 'UNKNOWN', message: 'Failed to capture location' } };
 }
 
+/** Check the current permission state for geolocation (non-blocking, best effort). */
+export async function checkPermissionState(): Promise<'granted' | 'prompt' | 'denied' | 'unknown'> {
+  if (typeof navigator === 'undefined' || !navigator.permissions || typeof navigator.permissions.query !== 'function') {
+    return 'unknown';
+  }
+  try {
+    const perm = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
+    if (perm.state === 'granted' || perm.state === 'prompt' || perm.state === 'denied') return perm.state as 'granted' | 'prompt' | 'denied';
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 /** Helper to get a user-friendly error message from a location result */
 export function getLocationErrorMessage(err: unknown): string {
   if (!err) return 'Unknown location error';
