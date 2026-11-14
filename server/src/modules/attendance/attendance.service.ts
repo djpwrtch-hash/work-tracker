@@ -671,7 +671,10 @@ export class AttendanceService {
     if (input.locationCapturedAt !== undefined) { sets.push('location_captured_at = ?'); params.push(input.locationCapturedAt); }
     params.push(id);
     await db.prepare(`UPDATE attendance SET ${sets.join(', ')} WHERE id = ?`).run(...params);
-    return await db.prepare('SELECT * FROM attendance WHERE id = ?').get(id);
+    await invalidateAttendanceCache();
+    const updated = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(id);
+    emitAttendanceUpdated(existing.user_id, updated);
+    return updated;
   }
 
   static async getMonthlySummary(userId: string, year: number, month: number) {

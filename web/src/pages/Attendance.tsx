@@ -599,8 +599,11 @@ export default function AttendancePage() {
 
   function todayUpdater(status: string, fields?: Record<string, any>) {
     return (old: any) => {
-      if (!old) return { status, login_time: new Date().toISOString(), ...fields };
-      return { ...old, status, ...fields };
+      // Drop undefined fields so they can't clobber existing values (e.g. a check-in
+      // coord must survive the check-out optimistic update).
+      const clean = fields ? Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined)) : {};
+      if (!old) return { status, login_time: new Date().toISOString(), ...clean };
+      return { ...old, status, ...clean };
     };
   }
 
@@ -657,9 +660,8 @@ export default function AttendancePage() {
 
   const handleCheckOut = async () => {
     setLocationError(null);
-    setCapturedLocation(null);
-    // Start the capture here so the user gesture is preserved for the permission prompt,
-    // and let the API call proceed in parallel — check-out never waits for GPS.
+    // Keep the previous (e.g. check-in) coordinate visible while the background capture runs;
+    // attachLocation updates it on success and leaves it untouched on failure.
     const capturePromise = locationEnabled ? captureLocation({ maxAttempts: 5, timeoutMs: 10000 }) : Promise.resolve({ location: null, error: { code: 'PERMISSION_DENIED', message: 'Location tracking is off in your profile.' } });
     try {
       const record = await checkOut.mutateAsync(null);
