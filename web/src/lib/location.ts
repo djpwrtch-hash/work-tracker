@@ -4,6 +4,8 @@ export interface BestLocation {
   accuracy: number;
   locationCapturedAt: string;
   success: boolean;
+  /** Where the position came from: device GPS or coarse IP geolocation. */
+  source?: 'gps' | 'ip';
 }
 
 export interface CaptureOptions {
@@ -13,15 +15,12 @@ export interface CaptureOptions {
   maxAttempts?: number;
   /** Set false to respect the user's "Grant IP logging" toggle — skips the IP-based fallback entirely. */
   ipEnabled?: boolean;
+  /** Collection window for the high-precision GPS watch (ms). */
+  windowMs?: number;
+  /** Stop the window early once a fix is this accurate (metres). */
+  targetAccuracy?: number;
   onProgress?: (accuracy: number, success: boolean) => void;
 }
-
-/** Defaults optimized for check-in/check-out use case. */
-const DEFAULT_GOOD_ACCURACY = 50;
-const DEFAULT_TIMEOUT_MS = 10000;
-const DEFAULT_MAXIMUM_AGE = 30000;
-const DEFAULT_MAX_ATTEMPTS = 3;
-const LOW_ACCURACY_TIMEOUT_MS = 5000;
 
 interface LocationError {
   code: 'PERMISSION_DENIED' | 'POSITION_UNAVAILABLE' | 'TIMEOUT' | 'UNKNOWN';
@@ -47,14 +46,11 @@ export async function fetchIpLocation(): Promise<BestLocation> {
     accuracy: 5000,
     locationCapturedAt: new Date().toISOString(),
     success: true,
+    source: 'ip',
   };
 }
 
 export async function captureLocation(options: CaptureOptions = {}): Promise<CaptureResult> {
-  const goodAccuracy = options.goodAccuracy ?? DEFAULT_GOOD_ACCURACY;
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const maximumAge = options.maximumAge ?? DEFAULT_MAXIMUM_AGE;
-  const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   const ipEnabled = options.ipEnabled ?? true;
   const onProgress = options.onProgress;
 
@@ -74,19 +70,40 @@ export async function captureLocation(options: CaptureOptions = {}): Promise<Cap
     return { location: null, error: { code: 'UNKNOWN', message: 'Geolocation is not supported by this browser.' } };
   }
 
-  // 2. Helper to run one getCurrentPosition attempt (called synchronously to preserve user gesture)
-  const runAttempt = (enableHighAccuracy: boolean, timeout: number): Promise<{ candidate: BestLocation | null; error: LocationError | null }> => {
+  // 2. High-precision collection window: use watchPosition to gather repeated readings and
+  // keep the best (lowest accuracy). Stop early once we hit the target (default 5 m).
+  const windowMs = options.windowMs ?? 20000;
+  const targetAccuracy = options.targetAccuracy ?? 5;
+  const minimumGpsAccuracy = 50; // GPS fixes up to 50 m still beat IP's ~5 km
+
+  const collectHighAccuracy = (): Promise<{ candidate: BestLocation | null; error: LocationError | null }> => {
     return new Promise((resolve) => {
-      navigator.geolocation.getCurrentPosition(
+      let best: BestLocation | null = null;
+      let lastErr: LocationError | null = null;
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        try { navigator.geolocation.clearWatch(watchId); } catch { /* ignore */ }
+        clearTimeout(timer);
+        resolve({ candidate: best, error: lastErr });
+      };
+      const watchId = navigator.geolocation.watchPosition(
         (pos) => {
+          const accuracy = Math.round(pos.coords.accuracy);
           const candidate: BestLocation = {
             latitude: pos.coords.latitude,
             longitude: pos.coords.longitude,
-            accuracy: Math.round(pos.coords.accuracy),
+            accuracy,
             locationCapturedAt: new Date().toISOString(),
             success: true,
+            source: 'gps',
           };
-          resolve({ candidate, error: null });
+          if (!best || candidate.accuracy < best.accuracy) {
+            best = candidate;
+            onProgress?.(candidate.accuracy, true);
+          }
+          if (candidate.accuracy <= targetAccuracy) finish(); // ideal fix reached — stop early
         },
         (err) => {
           const locationError: LocationError = { code: 'UNKNOWN', message: err.message || 'Failed to capture location' };
@@ -101,58 +118,32 @@ export async function captureLocation(options: CaptureOptions = {}): Promise<Cap
             locationError.message = 'Location request timed out. Please try again.';
           }
           console.error('[Location] Geolocation error:', locationError.code, locationError.message);
-          resolve({ candidate: null, error: locationError });
+          lastErr = locationError;
+          if (err.code === err.PERMISSION_DENIED) finish(); // hard fail — no point waiting out the window
         },
-        { enableHighAccuracy, timeout, maximumAge }
+        { enableHighAccuracy: true, timeout: windowMs, maximumAge: 0 }
       );
+      const timer = setTimeout(finish, windowMs);
     });
   };
 
-  // 3. Phase 1: high accuracy (up to maxAttempts)
-  let best: BestLocation | null = null;
-  let lastError: LocationError | null = null;
+  const { candidate: best, error: lastError } = await collectHighAccuracy();
 
-  for (let i = 0; i < maxAttempts; i++) {
-    const { candidate, error } = await runAttempt(true, timeoutMs);
-    if (candidate) {
-      if (!best || candidate.accuracy < best.accuracy) best = candidate;
-      onProgress?.(best.accuracy, true);
-      if (best.accuracy <= goodAccuracy) {
-        return { location: best, error: null };
-      }
-    } else if (error) {
-      lastError = error;
-      if (error.code === 'PERMISSION_DENIED') {
-        // Permission denied — no point retrying; fall through to IP-based fallback
-        break;
-      }
-      // TIMEOUT / POSITION_UNAVAILABLE → try next attempt
-    }
-    if (i < maxAttempts - 1) await new Promise((r) => setTimeout(r, 200));
-  }
-
-  // 4. Phase 2: fallback to low accuracy (Wi-Fi/IP) if no good reading
-  if (!best || best.accuracy > goodAccuracy) {
-    const { candidate, error } = await runAttempt(false, LOW_ACCURACY_TIMEOUT_MS);
-    if (candidate) {
-      if (!best || candidate.accuracy < best.accuracy) best = candidate;
-      onProgress?.(best.accuracy, true);
-    } else if (error) {
-      lastError = error;
-      // Don't hard-fail here — IP fallback runs below
-    }
-  }
-
-  if (best) {
+  // 3. Acceptance criteria: any GPS fix up to minimumGpsAccuracy beats the IP fallback.
+  if (best && best.accuracy <= minimumGpsAccuracy) {
     return { location: best, error: null };
   }
-  // 5. Browser geolocation failed entirely — fall back to approximate IP location (~5 km)
-  // so records still get a coarse position. Only when the failure is permission/availability
-  // related (not timeout / no-fix), only if the device is online, and only if the user has
-  // granted IP logging (ipEnabled). If IP logging is off, respect it and skip the lookup.
+
+  // 4. GPS returned nothing usable. Fall back to coarse IP location (~5 km) only when the failure
+  // is permission/availability related (not timeout/noise), only if online, and only if the user
+  // granted IP logging. Otherwise respect the toggle and return the error.
   if (!ipEnabled) {
     console.warn('[Location] IP-based fallback skipped — IP logging is disabled in your profile.');
     return { location: null, error: lastError ?? { code: 'PERMISSION_DENIED', message: 'IP-based fallback disabled. Enable location or IP logging in your profile, then retry.' } };
+  }
+  // If we have any coarse GPS fix at all, prefer it over IP.
+  if (best) {
+    return { location: best, error: null };
   }
   if (lastError && (lastError.code === 'PERMISSION_DENIED' || lastError.code === 'POSITION_UNAVAILABLE')) {
     try {

@@ -124,6 +124,17 @@ function mapLink(lat: number, lng: number): string {
   return `https://www.google.com/maps?q=${lat},${lng}`;
 }
 
+/** Toast copy for a captured location — distinguishes GPS-precise from IP-approximate results. */
+function locationToastText(location: { accuracy: number; source?: 'gps' | 'ip' }): string {
+  if (location.source === 'ip' || location.accuracy >= 1000) {
+    return `Approximate location captured (±${(location.accuracy / 1000).toFixed(0)} km, IP-based). Enable GPS for an exact fix.`;
+  }
+  if (location.accuracy > 5) {
+    return `Location captured (±${location.accuracy} m). Move outdoors and tap Retry location for a tighter fix.`;
+  }
+  return `Location captured (±${location.accuracy} m, GPS)`;
+}
+
 function LocationCell({ latitude, longitude }: { latitude?: number | string | null; longitude?: number | string | null }) {
   // MySQL returns DECIMAL columns as strings over the wire; coerce so they still render.
   const lat = typeof latitude === 'string' ? Number(latitude) : latitude;
@@ -727,7 +738,7 @@ export default function AttendancePage() {
         if (updated) {
           qc.setQueryData(['todayAtt'], (old: any) => (old ? { ...old, ...updated } : { id: record.id, ...updated }));
         }
-        toast.success(`Location captured (±${result.location.accuracy} m)`);
+        toast.success(locationToastText(result.location));
         await qc.refetchQueries({ queryKey: ['todayAtt'] });
         // Safety net: never let a lagged refetch revert the cell to "No location".
         if (updated) {
@@ -771,7 +782,7 @@ export default function AttendancePage() {
           qc.setQueryData(['todayAtt'], (old: any) => (old ? { ...old, ...updated } : old));
         }
         void qc.invalidateQueries({ queryKey: ['todayEvents'] });
-        toast.success(`Location captured (±${result.location.accuracy} m)`);
+        toast.success(locationToastText(result.location));
       } else if (result.error) {
         setLocationError(`${getLocationErrorMessage(result.error)} Location not saved.`);
         toast.error(getLocationErrorMessage(result.error));
