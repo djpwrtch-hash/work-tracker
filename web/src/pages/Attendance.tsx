@@ -687,11 +687,18 @@ export default function AttendancePage() {
           locationCapturedAt: result.location.locationCapturedAt,
         });
         const updated = res.data;
+        // Cancel any in-flight fetch (e.g. the mutation's onSettled refetch) so it
+        // can't overwrite the patched record with a stale pre-PATCH snapshot.
+        await qc.cancelQueries({ queryKey: ['todayAtt'] });
         if (updated) {
           qc.setQueryData(['todayAtt'], (old: any) => (old ? { ...old, ...updated } : { id: record.id, ...updated }));
         }
         toast.success(`Location captured (±${result.location.accuracy} m)`);
-        void qc.refetchQueries({ queryKey: ['todayAtt'] });
+        await qc.refetchQueries({ queryKey: ['todayAtt'] });
+        // Safety net: never let a lagged refetch revert the cell to "No location".
+        if (updated) {
+          qc.setQueryData(['todayAtt'], (old: any) => (old ? { ...old, ...updated } : old));
+        }
         void qc.invalidateQueries({ queryKey: ['todayEvents'] });
       } else if (result.error && locationEnabled) {
         setLocationError(`${getLocationErrorMessage(result.error)} Location not saved.`);
@@ -718,10 +725,16 @@ export default function AttendancePage() {
           locationCapturedAt: result.location.locationCapturedAt,
         });
         const updated = res.data;
+        // Cancel any in-flight fetch so it can't overwrite the patched record.
+        await qc.cancelQueries({ queryKey: ['todayAtt'] });
         if (updated) {
           qc.setQueryData(['todayAtt'], (old: any) => (old ? { ...old, ...updated } : { id: recId, ...updated }));
         }
-        void qc.refetchQueries({ queryKey: ['todayAtt'] });
+        await qc.refetchQueries({ queryKey: ['todayAtt'] });
+        // Safety net: never let a lagged refetch revert the cell to "No location".
+        if (updated) {
+          qc.setQueryData(['todayAtt'], (old: any) => (old ? { ...old, ...updated } : old));
+        }
         void qc.invalidateQueries({ queryKey: ['todayEvents'] });
         toast.success(`Location captured (±${result.location.accuracy} m)`);
       } else if (result.error) {
