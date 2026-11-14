@@ -558,9 +558,15 @@ export default function AttendancePage() {
   const [attError, setAttError] = useState('');
   const [gettingLocation, setGettingLocation] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [capturedLocation, setCapturedLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteText, setDeleteText] = useState('');
   const [deleteMsg, setDeleteMsg] = useState('');
+
+  // Reset the captured-location override whenever a genuinely new attendance record appears
+  // (e.g. next day's check-in) so it can't leak across days.
+  const todayId = (today as any)?.id;
+  useEffect(() => { setCapturedLocation(null); }, [todayId]);
 
   const deleteFiltered = useMutation({
     retry: 0,
@@ -651,6 +657,7 @@ export default function AttendancePage() {
 
   const handleCheckOut = async () => {
     setLocationError(null);
+    setCapturedLocation(null);
     // Start the capture here so the user gesture is preserved for the permission prompt,
     // and let the API call proceed in parallel — check-out never waits for GPS.
     const capturePromise = locationEnabled ? captureLocation({ maxAttempts: 5, timeoutMs: 10000 }) : Promise.resolve({ location: null, error: { code: 'PERMISSION_DENIED', message: 'Location tracking is off in your profile.' } });
@@ -666,6 +673,7 @@ export default function AttendancePage() {
 
   const handleCheckIn = async () => {
     setLocationError(null);
+    setCapturedLocation(null);
     const capturePromise = locationEnabled ? captureLocation({ maxAttempts: 5, timeoutMs: 10000 }) : Promise.resolve({ location: null, error: { code: 'PERMISSION_DENIED', message: 'Location tracking is off in your profile.' } });
     try {
       const record = await checkIn.mutateAsync(null);
@@ -687,6 +695,7 @@ export default function AttendancePage() {
           locationCapturedAt: result.location.locationCapturedAt,
         });
         const updated = res.data;
+        setCapturedLocation({ latitude: result.location.latitude, longitude: result.location.longitude });
         // Cancel any in-flight fetch (e.g. the mutation's onSettled refetch) so it
         // can't overwrite the patched record with a stale pre-PATCH snapshot.
         await qc.cancelQueries({ queryKey: ['todayAtt'] });
@@ -725,6 +734,7 @@ export default function AttendancePage() {
           locationCapturedAt: result.location.locationCapturedAt,
         });
         const updated = res.data;
+        setCapturedLocation({ latitude: result.location.latitude, longitude: result.location.longitude });
         // Cancel any in-flight fetch so it can't overwrite the patched record.
         await qc.cancelQueries({ queryKey: ['todayAtt'] });
         if (updated) {
@@ -783,7 +793,10 @@ export default function AttendancePage() {
     if (!recId) { toast.error('No attendance record to attach location to'); return; }
     try {
       await api.patch(`/attendance/${recId}`, { latitude: lat, longitude: lng, accuracy: 1000, locationCapturedAt: new Date().toISOString() });
-      await qc.invalidateQueries({ queryKey: ['todayAtt'] });
+      setCapturedLocation({ latitude: lat, longitude: lng });
+      await qc.cancelQueries({ queryKey: ['todayAtt'] });
+      void qc.invalidateQueries({ queryKey: ['todayAtt'] });
+      void qc.invalidateQueries({ queryKey: ['todayEvents'] });
       toast.success('Manual location saved');
       setManualLat('');
       setManualLng('');
@@ -985,8 +998,8 @@ export default function AttendancePage() {
               <div>
                 <p className="text-xs text-slate-400">Location</p>
                 <div className="flex items-center gap-2 mt-1">
-                  <p className="text-sm text-white"><LocationCell latitude={today.latitude} longitude={today.longitude} /></p>
-                  {today.latitude == null && locationEnabled && (
+                  <p className="text-sm text-white"><LocationCell latitude={capturedLocation?.latitude ?? today.latitude} longitude={capturedLocation?.longitude ?? today.longitude} /></p>
+                  {(capturedLocation ?? today)?.latitude == null && locationEnabled && (
                     <button onClick={() => handleRetryLocation()} disabled={gettingLocation}
                       className="flex items-center gap-1 rounded-lg border border-violet-500/40 text-violet-300 hover:bg-violet-500/10 px-2 py-1 text-[10px] font-medium transition disabled:opacity-50 whitespace-nowrap">
                       {gettingLocation ? <Loader2 className="h-3 w-3 animate-spin" /> : <MapPin className="h-3 w-3" />}Retry location
