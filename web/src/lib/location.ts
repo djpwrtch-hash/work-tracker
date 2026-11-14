@@ -120,8 +120,8 @@ export async function captureLocation(options: CaptureOptions = {}): Promise<Cap
     } else if (error) {
       lastError = error;
       if (error.code === 'PERMISSION_DENIED') {
-        // Fail fast on permission denial — no point retrying
-        return { location: null, error };
+        // Permission denied — no point retrying; fall through to IP-based fallback
+        break;
       }
       // TIMEOUT / POSITION_UNAVAILABLE → try next attempt
     }
@@ -136,9 +136,7 @@ export async function captureLocation(options: CaptureOptions = {}): Promise<Cap
       onProgress?.(best.accuracy, true);
     } else if (error) {
       lastError = error;
-      if (error.code === 'PERMISSION_DENIED') {
-        return { location: null, error };
-      }
+      // Don't hard-fail here — IP fallback runs below
     }
   }
 
