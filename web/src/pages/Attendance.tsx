@@ -166,6 +166,8 @@ export default function AttendancePage() {
 
   const [permissionState, setPermissionState] = useState<'granted' | 'prompt' | 'denied' | 'unknown'>('unknown');
   const [testResult, setTestResult] = useState<string>('');
+  const [manualLat, setManualLat] = useState('');
+  const [manualLng, setManualLng] = useState('');
 
   useEffect(() => {
     let mounted = true;
@@ -732,6 +734,39 @@ export default function AttendancePage() {
     }
   };
 
+  const clearSiteDataAndReload = async () => {
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((key) => caches.delete(key)));
+      }
+      toast.success('Site data cleared. Reloading…');
+      window.location.reload();
+    } catch {
+      window.location.reload();
+    }
+  };
+
+  const saveManualLocation = async () => {
+    if (!manualLat.trim() || !manualLng.trim()) { toast.error('Enter latitude and longitude'); return; }
+    const lat = Number(manualLat.trim());
+    const lng = Number(manualLng.trim());
+    if (Number.isNaN(lat) || Number.isNaN(lng)) { toast.error('Coordinates must be numbers'); return; }
+    const recId = (today as any)?.id;
+    if (!recId) { toast.error('No attendance record to attach location to'); return; }
+    try {
+      await api.patch(`/attendance/${recId}`, { latitude: lat, longitude: lng, accuracy: 1000, locationCapturedAt: new Date().toISOString() });
+      await qc.invalidateQueries({ queryKey: ['todayAtt'] });
+      toast.success('Manual location saved');
+      setManualLat('');
+      setManualLng('');
+    } catch (e: any) {
+      toast.error(getApiError(e, 'Failed to save location'));
+    }
+  };
+
   const startPause = useMutation({
     retry: 0,
     mutationFn: async () => (await api.post('/attendance/pause-start', {})).data,
@@ -786,24 +821,42 @@ export default function AttendancePage() {
     <DashboardLayout>
       <div className="space-y-6 animate-fade-in">
         {permissionState === 'denied' && (
-          <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
-            <div className="flex-1">
-              <p className="text-sm font-semibold text-rose-400">Location is blocked for this site</p>
-              <p className="text-xs text-rose-400/80 mt-1">Check-in and check-out will work, but no location will be saved. Tap below to re-enable it.</p>
-              <details className="mt-2">
-                <summary className="cursor-pointer text-xs font-medium text-rose-300 hover:text-rose-200 transition">How to re-enable it in Chrome</summary>
-                <ol className="list-decimal pl-5 mt-2 space-y-0.5 text-xs text-amber-300">
-                  <li>Tap the <span className="font-semibold">lock icon</span> in the address bar.</li>
-                  <li>Tap <span className="font-semibold">Site settings</span> → <span className="font-semibold">Location</span>.</li>
-                  <li>Set it to <span className="font-semibold">Allow</span>.</li>
-                  <li>Return to this tab and tap <span className="font-semibold">Retry location</span>.</li>
-                </ol>
-                <p className="text-xs text-rose-400/60 mt-2">Or: Chrome → ⋮ → Settings → Privacy and security → Site settings → Location → find this site → Allow.</p>
-              </details>
+          <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl px-5 py-4 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-rose-400">Location is blocked for this site</p>
+                <p className="text-xs text-rose-400/80 mt-1">Check-in and check-out will work, but no location will be saved. Tap below to re-enable it.</p>
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-xs font-medium text-rose-300 hover:text-rose-200 transition">How to re-enable it in Chrome</summary>
+                  <ol className="list-decimal pl-5 mt-2 space-y-0.5 text-xs text-amber-300">
+                    <li>Tap the <span className="font-semibold">lock icon</span> in the address bar.</li>
+                    <li>Tap <span className="font-semibold">Site settings</span> → <span className="font-semibold">Location</span>.</li>
+                    <li>Set it to <span className="font-semibold">Allow</span>.</li>
+                    <li><span className="font-semibold">Close this tab completely</span> (swipe it away) and reopen it — the permission state is cached in the open tab.</li>
+                  </ol>
+                  <p className="text-xs text-rose-400/60 mt-2">Or: Chrome → ⋮ → Settings → Privacy and security → Site settings → Location → find this site → Allow → <span className="font-semibold">fully close and reopen the tab</span>.</p>
+                </details>
+              </div>
+              <div className="flex flex-col gap-2 flex-shrink-0">
+                <button onClick={handleTestLocation} className="rounded-xl bg-rose-600 hover:bg-rose-700 text-white px-4 py-2.5 text-xs font-semibold transition whitespace-nowrap">
+                  Test my location
+                </button>
+                <button onClick={clearSiteDataAndReload} className="rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 px-4 py-2.5 text-xs font-semibold transition whitespace-nowrap">
+                  Clear site data & reload
+                </button>
+              </div>
             </div>
-            <button onClick={handleTestLocation} className="flex-shrink-0 rounded-xl bg-rose-600 hover:bg-rose-700 text-white px-4 py-2.5 text-xs font-semibold transition whitespace-nowrap">
-              Test my location
-            </button>
+            <div className="border-t border-rose-500/20 pt-4">
+              <p className="text-xs font-semibold text-rose-300 mb-2">Quick fix: enter coordinates manually</p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input type="text" value={manualLat} onChange={(e) => setManualLat(e.target.value)} placeholder="Latitude (e.g. 20.2961)" className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs text-white flex-1" />
+                <input type="text" value={manualLng} onChange={(e) => setManualLng(e.target.value)} placeholder="Longitude (e.g. 85.8245)" className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs text-white flex-1" />
+                <button onClick={() => saveManualLocation()} className="rounded-lg bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 text-xs font-semibold transition whitespace-nowrap">
+                  Save
+                </button>
+              </div>
+              <p className="text-[10px] text-rose-400/60 mt-1">Tip: open Google Maps on another device, long-press your location, and copy the coordinates.</p>
+            </div>
           </div>
         )}
         {testResult && (
