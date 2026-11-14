@@ -676,12 +676,13 @@ export default function AttendancePage() {
   });
 
   const locationEnabled = user?.locationEnabled ?? true;
+  const ipEnabled = user?.ipEnabled ?? true;
 
   const handleCheckOut = async () => {
     setLocationError(null);
     // Keep the previous (e.g. check-in) coordinate visible while the background capture runs;
     // attachLocation updates it on success and leaves it untouched on failure.
-    const capturePromise = locationEnabled ? captureLocation({ maxAttempts: 5, timeoutMs: 10000 }) : Promise.resolve({ location: null, error: { code: 'PERMISSION_DENIED', message: 'Location tracking is off in your profile.' } });
+    const capturePromise = locationEnabled ? captureLocation({ maxAttempts: 5, timeoutMs: 10000, ipEnabled }) : Promise.resolve({ location: null, error: { code: 'PERMISSION_DENIED', message: 'Location tracking is off in your profile.' } });
     try {
       const record = await checkOut.mutateAsync(null);
       toast.success('Checked out');
@@ -695,7 +696,7 @@ export default function AttendancePage() {
   const handleCheckIn = async () => {
     setLocationError(null);
     setCapturedLocation(null);
-    const capturePromise = locationEnabled ? captureLocation({ maxAttempts: 5, timeoutMs: 10000 }) : Promise.resolve({ location: null, error: { code: 'PERMISSION_DENIED', message: 'Location tracking is off in your profile.' } });
+    const capturePromise = locationEnabled ? captureLocation({ maxAttempts: 5, timeoutMs: 10000, ipEnabled }) : Promise.resolve({ location: null, error: { code: 'PERMISSION_DENIED', message: 'Location tracking is off in your profile.' } });
     try {
       const record = await checkIn.mutateAsync(null);
       toast.success('Checked in');
@@ -746,7 +747,7 @@ export default function AttendancePage() {
     setLocationError(null);
     setGettingLocation(true);
     try {
-      const result = await captureLocation({ maxAttempts: 5, timeoutMs: 10000 });
+      const result = await captureLocation({ maxAttempts: 5, timeoutMs: 10000, ipEnabled });
       if (result.location) {
         const res = await api.patch(`/attendance/${recId}`, {
           latitude: result.location.latitude,
@@ -782,7 +783,7 @@ export default function AttendancePage() {
 
   const handleTestLocation = async () => {
     setTestResult('Testing…');
-    const result = await captureLocation({ maxAttempts: 2, timeoutMs: 5000, goodAccuracy: 500 });
+    const result = await captureLocation({ maxAttempts: 2, timeoutMs: 5000, goodAccuracy: 500, ipEnabled });
     if (result.location) {
       setTestResult(`Location works! ±${result.location.accuracy} m (${result.location.latitude.toFixed(5)}, ${result.location.longitude.toFixed(5)})`);
     } else {

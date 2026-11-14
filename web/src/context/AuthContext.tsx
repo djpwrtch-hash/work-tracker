@@ -71,7 +71,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         const me = await api.get('/auth/me');
         if (!cancelled) setUser((prev: any) => {
-          if (prev && prev.id === me.data.id && prev.role === me.data.role && prev.accessLevel === me.data.accessLevel && prev.status === me.data.status) return prev;
+          if (prev && prev.id === me.data.id && prev.role === me.data.role && prev.accessLevel === me.data.accessLevel && prev.status === me.data.status && prev.locationEnabled === me.data.locationEnabled && prev.ipEnabled === me.data.ipEnabled) return prev;
           return me.data;
         });
       } catch {

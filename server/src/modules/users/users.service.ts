@@ -78,8 +78,8 @@ export class UsersService {
       const existing = await db.prepare('SELECT id FROM users WHERE email = ?').get(input.email);
       if (existing) throw new AppError(409, 'Email already exists');
 
-      await db.prepare(`INSERT INTO users (id, employee_id, first_name, last_name, email, password_hash, role, phone_number, department_id, designation, joining_date, dob, gender, father_name, nationality, qualification, address_street, address_city, address_state, address_pincode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(id, empId, input.firstName, input.lastName, input.email, passwordHash, input.role, input.phoneNumber ?? null, input.departmentId ?? null, input.designation ?? null, toSQLDate(input.joiningDate), toSQLDate(input.dob), input.gender, input.fatherName, input.nationality, input.qualification, input.addressStreet, input.addressCity, input.addressState, input.addressPincode);
+      await db.prepare(`INSERT INTO users (id, employee_id, first_name, last_name, email, password_hash, role, phone_number, department_id, designation, joining_date, dob, gender, father_name, nationality, qualification, address_street, address_city, address_state, address_pincode, location_enabled, ip_enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, empId, input.firstName, input.lastName, input.email, passwordHash, input.role, input.phoneNumber ?? null, input.departmentId ?? null, input.designation ?? null, toSQLDate(input.joiningDate), toSQLDate(input.dob), input.gender, input.fatherName, input.nationality, input.qualification, input.addressStreet, input.addressCity, input.addressState, input.addressPincode, 1, 1);
 
       return empId;
     })();

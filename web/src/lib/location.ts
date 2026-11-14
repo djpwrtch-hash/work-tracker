@@ -11,6 +11,8 @@ export interface CaptureOptions {
   timeoutMs?: number;
   maximumAge?: number;
   maxAttempts?: number;
+  /** Set false to respect the user's "Grant IP logging" toggle — skips the IP-based fallback entirely. */
+  ipEnabled?: boolean;
   onProgress?: (accuracy: number, success: boolean) => void;
 }
 
@@ -53,6 +55,7 @@ export async function captureLocation(options: CaptureOptions = {}): Promise<Cap
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maximumAge = options.maximumAge ?? DEFAULT_MAXIMUM_AGE;
   const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+  const ipEnabled = options.ipEnabled ?? true;
   const onProgress = options.onProgress;
 
   // 1. Secure context check
@@ -143,9 +146,14 @@ export async function captureLocation(options: CaptureOptions = {}): Promise<Cap
   if (best) {
     return { location: best, error: null };
   }
-  // Browser geolocation failed entirely — fall back to approximate IP location (~5 km)
+  // 5. Browser geolocation failed entirely — fall back to approximate IP location (~5 km)
   // so records still get a coarse position. Only when the failure is permission/availability
-  // related (not timeout / no-fix), and only if the device is online.
+  // related (not timeout / no-fix), only if the device is online, and only if the user has
+  // granted IP logging (ipEnabled). If IP logging is off, respect it and skip the lookup.
+  if (!ipEnabled) {
+    console.warn('[Location] IP-based fallback skipped — IP logging is disabled in your profile.');
+    return { location: null, error: lastError ?? { code: 'PERMISSION_DENIED', message: 'IP-based fallback disabled. Enable location or IP logging in your profile, then retry.' } };
+  }
   if (lastError && (lastError.code === 'PERMISSION_DENIED' || lastError.code === 'POSITION_UNAVAILABLE')) {
     try {
       const ip = await fetchIpLocation();
