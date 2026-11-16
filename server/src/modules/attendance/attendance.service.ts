@@ -546,7 +546,8 @@ export class AttendanceService {
     const today = getISTDate();
     const rows = await db.prepare(`
       SELECT u.id, u.first_name, u.last_name, u.employee_id, u.role,
-             a.status as today_status, a.login_time, a.logout_time, a.working_hours, a.overtime_hours, a.pause_minutes,
+             a.id AS attendance_id, a.date, a.notes,
+             a.status as today_status, a.login_time, a.logout_time, a.working_hours, a.overtime_hours, a.pause_minutes, a.pause_start_time, a.pause_end_time,
              a.latitude, a.longitude, a.location_accuracy, a.location_captured_at
       FROM users u
       LEFT JOIN attendance a ON a.user_id = u.id AND a.date = ?
@@ -647,7 +648,13 @@ export class AttendanceService {
     // Auto-calculate hours/pause from the edited times when the caller did not supply the
     // computed fields explicitly. Overtime uses the same 8-hour (480 min) workday threshold as check-out.
     if (isAdmin && (input.loginTime !== undefined || input.logoutTime !== undefined || input.pauseStartTime !== undefined || input.pauseEndTime !== undefined)) {
-      const eff = (key: string, dbVal: any) => (input[key] !== undefined ? parseUTC(String(input[key])) : dbVal ? parseUTC(String(dbVal)) : null);
+      const eff = (key: string, dbVal: any) => {
+        if (input[key] !== undefined && String(input[key]).trim() !== '') {
+          const d = parseUTC(String(input[key]));
+          if (!isNaN(d.getTime())) return d;
+        }
+        return dbVal ? parseUTC(String(dbVal)) : null;
+      };
       const login = eff('loginTime', existing.login_time);
       const logout = eff('logoutTime', existing.logout_time);
       const ps = eff('pauseStartTime', existing.pause_start_time);

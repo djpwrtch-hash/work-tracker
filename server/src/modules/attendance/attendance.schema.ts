@@ -74,7 +74,7 @@ export const updateAttendanceSchema = z.object({
   pauseStartTime: dbDatetimeISO.optional(),
   pauseEndTime: dbDatetimeISO.optional(),
   pauseMinutes: z.number().min(0).optional(),
-  notes: z.string().trim().optional(),
+  notes: z.string().trim().nullable().optional(),
   latitude: z.number().min(-90).max(90).optional(),
   longitude: z.number().min(-180).max(180).optional(),
   accuracy: z.number().min(0).optional(),

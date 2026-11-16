@@ -40,7 +40,7 @@ function dateOnlyOf(v: any): string {
 /** Parse "HH:MM" to minutes since midnight, or null when invalid/empty. */
 function hmToMinutes(v: any): number | null {
   const s = String(v ?? '').trim();
-  const m = s.match(/^(\d{1,2}):(\d{2})$/);
+  const m = s.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
   if (!m) return null;
   const h = Number(m[1]), min = Number(m[2]);
   if (h < 0 || h > 23 || min < 0 || min > 59) return null;
@@ -69,7 +69,8 @@ function computeHoursFromTimes(f: { loginTime?: string; logoutTime?: string; pau
   if (login === null || logout === null) {
     return { workingHours: null as number | null, overtimeHours: null as number | null, pauseMinutes };
   }
-  const raw = Math.max(0, logout - login);
+  // Overnight shifts: if logout is earlier than login, treat logout as next-day
+  const raw = logout >= login ? (logout - login) : (logout + 1440 - login);
   const workMinutes = Math.max(0, raw - pauseForCalc);
   return {
     workingHours: Math.round((workMinutes / 60) * 100) / 100,
@@ -1341,12 +1342,36 @@ export default function AttendancePage() {
               rowKey={(u: any) => u.id}
               mobileTitle={(u: any) => <p className="font-semibold text-white text-sm">{u.first_name} {u.last_name} <span className="text-xs text-slate-500 font-normal">({u.employee_id})</span></p>}
               actions={(u: any) => (
-                <button onClick={() => { setHistoryUser(u); setHistoryDateRange(null); setHistoryMonth({ month: now.getMonth() + 1, year: now.getFullYear() }); }}
-                  className="text-slate-500 hover:text-white transition p-1.5 rounded-lg hover:bg-slate-800">
-                  <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
-                  </svg>
-                </button>
+                <div className="flex items-center gap-1">
+                  {u.attendance_id && (
+                    <button onClick={() => startEdit({
+                      id: u.attendance_id,
+                      date: u.date,
+                      first_name: u.first_name,
+                      last_name: u.last_name,
+                      employee_id: u.employee_id,
+                      status: u.today_status ?? 'absent',
+                      login_time: u.login_time,
+                      logout_time: u.logout_time,
+                      pause_start_time: u.pause_start_time,
+                      pause_end_time: u.pause_end_time,
+                      pause_minutes: u.pause_minutes,
+                      working_hours: u.working_hours,
+                      overtime_hours: u.overtime_hours,
+                      notes: u.notes,
+                    })} aria-label={`Edit ${u.first_name}'s attendance`} title="Edit today's attendance"
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-violet-500/15 text-slate-500 hover:text-violet-300 transition text-xs font-medium">
+                      <Pencil className="h-4 w-4" />Edit
+                    </button>
+                  )}
+                  <button onClick={() => { setHistoryUser(u); setHistoryDateRange(null); setHistoryMonth({ month: now.getMonth() + 1, year: now.getFullYear() }); }}
+                    aria-label={`View ${u.first_name}'s history`}
+                    className="text-slate-500 hover:text-white transition p-1.5 rounded-lg hover:bg-slate-800">
+                    <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                    </svg>
+                  </button>
+                </div>
               )}
             />
           </div>
