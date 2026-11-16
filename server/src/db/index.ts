@@ -708,6 +708,20 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       `);
     },
   },
+  {
+    version: 32,
+    name: 'extra-work-accepted-by',
+    up: async () => {
+      await addColumnIfMissing('attendance_extra_work', 'accepted_by_id', 'accepted_by_id VARCHAR(36) NULL');
+    },
+  },
+  {
+    version: 33,
+    name: 'document-rejected-by',
+    up: async () => {
+      await addColumnIfMissing('document_requests', 'rejected_by_id', 'rejected_by_id VARCHAR(36) NULL');
+    },
+  },
 ];
 
 await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (

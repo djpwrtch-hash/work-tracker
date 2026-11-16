@@ -50,6 +50,12 @@ export default function ChatPage() {
     onError: (e) => toast.error(getApiError(e, 'Failed to send message')),
   });
 
+  const ensureThread = useMutation({
+    mutationFn: async (employeeId: string) => (await api.post(`/messages/threads/ensure/${employeeId}`, {})).data,
+    onSuccess: (data: any) => { qc.invalidateQueries({ queryKey: ['chatThreads'] }); if (data?.threadId) setSelectedThread(data.threadId); },
+    onError: (e) => toast.error(getApiError(e, 'Failed to start chat')),
+  });
+
   const markRead = useCallback(async (threadId: string) => {
     try { await api.patch(`/messages/threads/${threadId}/read`, {}); } catch (e) { console.error('[Chat] markRead failed:', e); }
     qc.invalidateQueries({ queryKey: ['chatThreads'] });
@@ -113,7 +119,14 @@ export default function ChatPage() {
   });
 
   const myThread = threads[0];
-  const headerTitle = isAdmin ? (threads.find((t: any) => t.threadId === selectedThread) ? `${threads.find((t: any) => t.threadId === selectedThread)?.employeeFirstName} ${threads.find((t: any) => t.threadId === selectedThread)?.employeeLastName}` : 'Chat') : 'HR Support';
+  const selectedEmployee = threads.find((t: any) => t.threadId === selectedThread);
+  const headerTitle = isAdmin ? (selectedEmployee ? `${selectedEmployee.employeeFirstName} ${selectedEmployee.employeeLastName}` : 'Chat') : 'HR Support';
+
+  // Click an employee row — ensures a thread exists (admin)
+  const openEmployee = (t: any) => {
+    if (t.threadId) { setSelectedThread(t.threadId); return; }
+    ensureThread.mutate(t.employeeId);
+  };
 
   return (
     <DashboardLayout>
@@ -132,17 +145,17 @@ export default function ChatPage() {
               {threadsLoading ? (
                 <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-slate-500" /></div>
               ) : filteredThreads.length === 0 ? (
-                <p className="px-4 py-8 text-center text-sm text-slate-500">No chats yet</p>
+                <p className="px-4 py-8 text-center text-sm text-slate-500">No employees match your search</p>
               ) : filteredThreads.map((t: any) => (
-                <button key={t.threadId} onClick={() => setSelectedThread(t.threadId)}
-                  className={`flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-slate-800 ${selectedThread === t.threadId ? 'bg-slate-800' : ''}`}>
+                <button key={t.employeeId} onClick={() => openEmployee(t)} disabled={ensureThread.isPending}
+                  className={`flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-slate-800 disabled:opacity-50 ${selectedThread === t.threadId ? 'bg-slate-800' : ''}`}>
                   <Avatar user={{ firstName: t.employeeFirstName, lastName: t.employeeLastName, profilePictureUrl: t.profilePictureUrl }} size="sm" />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
                       <span className="truncate text-sm font-semibold text-white">{t.employeeFirstName} {t.employeeLastName}</span>
                       {Number(t.unread ?? 0) > 0 && <span className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold text-white">{t.unread > 99 ? '99+' : t.unread}</span>}
                     </div>
-                    <p className="truncate text-xs text-slate-500">{t.lastMessage ?? 'No messages yet'}</p>
+                    <p className="truncate text-xs text-slate-500">{t.lastMessage ?? (t.threadId ? 'No messages yet' : 'Click to start chat')}</p>
                   </div>
                 </button>
               ))}
@@ -162,7 +175,12 @@ export default function ChatPage() {
           </div>
 
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 bg-[#0a0a0f]">
-            {msgLoading ? (
+            {!selectedThread ? (
+              <div className="flex h-full flex-col items-center justify-center text-center">
+                <MessageCircle className="h-10 w-10 text-slate-700 mb-2" />
+                <p className="text-sm text-slate-500">Select an employee to start a conversation</p>
+              </div>
+            ) : msgLoading ? (
               <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-slate-500" /></div>
             ) : messages.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center text-center">
@@ -189,6 +207,7 @@ export default function ChatPage() {
             <div ref={bottomRef} />
           </div>
 
+          {selectedThread && (
           <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="flex items-center gap-2 border-t border-slate-800 p-3">
             <input
               value={message}
@@ -200,6 +219,7 @@ export default function ChatPage() {
               {sendMutation.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </button>
           </form>
+          )}
         </div>
       </div>
     </DashboardLayout>

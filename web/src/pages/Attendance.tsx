@@ -1232,9 +1232,15 @@ export default function AttendancePage() {
             <div className="h-8 w-8 border-2 border-sky-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
           </div>
         )}
+        {correctionRequest && correctionRequest.status === 'approved' && (
+          <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl px-5 py-4">
+            <p className="text-sm font-semibold text-emerald-400">Check-in approved{correctionRequest.reviewer_first_name ? ` by ${correctionRequest.reviewer_first_name} ${correctionRequest.reviewer_last_name}` : ''}</p>
+            <p className="text-xs text-emerald-400/80 mt-1">You can now check in.</p>
+          </div>
+        )}
         {correctionRequest && correctionRequest.status === 'rejected' && (
           <div className="bg-rose-500/10 border border-rose-500/20 rounded-2xl px-5 py-4">
-            <p className="text-sm font-semibold text-rose-400">Check-in request rejected</p>
+            <p className="text-sm font-semibold text-rose-400">Check-in request rejected{correctionRequest.reviewer_first_name ? ` by ${correctionRequest.reviewer_first_name} ${correctionRequest.reviewer_last_name}` : ''}</p>
             <p className="text-xs text-rose-400/80 mt-1">{correctionRequest.reviewComment ? `Reason: ${correctionRequest.reviewComment}. Please contact your manager.` : 'Please contact your manager for help.'}</p>
           </div>
         )}
@@ -1308,7 +1314,7 @@ export default function AttendancePage() {
                 <div key={e.id} className="py-3 flex flex-col sm:flex-row sm:items-center gap-3">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-white">{isAdmin ? <>{e.firstName} {e.lastName} <span className="text-xs text-slate-500 font-normal">({e.employeeId})</span></> : 'You'}</p>
-                    <p className="text-xs text-slate-500 mt-0.5">{formatDate(e.date)} · {e.startTime}–{e.endTime} ({e.hours}h){e.accepted ? ' · Accepted' : ' · Pending review'}{e.notes ? ` · ${e.notes}` : ''}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">{formatDate(e.date)} · {e.startTime}–{e.endTime} ({e.hours}h){e.accepted ? ` · Accepted${e.acceptedByName ? ` by ${e.acceptedByName}` : ''}` : ' · Pending review'}{e.notes ? ` · ${e.notes}` : ''}</p>
                   </div>
                   <div className="flex gap-2 flex-shrink-0">
                     {isAdmin && !e.accepted && (

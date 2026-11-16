@@ -340,6 +340,7 @@ export interface DocumentRequest {
   email?: string | null;
   tenure?: string | null;
   issuedByName: string | null;
+  rejectedByName?: string | null;
 }
 
 export interface DocumentsResponse {

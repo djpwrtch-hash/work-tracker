@@ -131,9 +131,11 @@ export default function LeavesPage() {
             <span className={totalRemaining < 0 ? 'text-rose-400 font-semibold' : ''}>Total {totalRemaining}</span>
           </span> },
       { header: 'Reason', key: 'reason', render: (l: any) => <span className="text-slate-300 text-xs">{l.reason || '-'}</span> },
-      { header: 'Rejection', key: 'rejection', render: (l: any) => l.status === 'rejected' && l.reviewComment
-        ? <span className="text-rose-400 text-xs">Rejected by <span className="font-semibold">{l.reviewerFirstName} {l.reviewerLastName}</span><br />{l.reviewComment}</span>
-        : <span className="text-slate-600 text-xs">-</span> },
+      { header: 'Review', key: 'review', render: (l: any) => l.status === 'rejected' && (l.reviewerFirstName || l.reviewerLastName)
+        ? <span className="text-rose-400 text-xs">Rejected by <span className="font-semibold">{l.reviewerFirstName} {l.reviewerLastName}</span>{l.reviewComment ? <><br />{l.reviewComment}</> : null}</span>
+        : l.status === 'approved' && (l.reviewerFirstName || l.reviewerLastName)
+          ? <span className="text-emerald-400 text-xs">Approved by <span className="font-semibold">{l.reviewerFirstName} {l.reviewerLastName}</span></span>
+          : <span className="text-slate-600 text-xs">-</span> },
     );
     return cols;
   }, [isAdmin, balance, totalRemaining]);

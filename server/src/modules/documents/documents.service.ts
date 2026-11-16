@@ -10,11 +10,12 @@ const SELECT = `
          u.dob, u.qualification, u.gender, u.address_street, u.address_city, u.address_state, u.address_pincode,
          u.father_name, u.phone_number, u.email,
          dept.name AS department_name,
-         iu.first_name AS issued_by_first, iu.last_name AS issued_by_last
+         iu.first_name AS issued_by_first, iu.last_name AS issued_by_last, ru.first_name AS rejected_by_first, ru.last_name AS rejected_by_last
   FROM document_requests d
   JOIN users u ON d.user_id = u.id
   LEFT JOIN departments dept ON u.department_id = dept.id
   LEFT JOIN users iu ON d.issued_by_id = iu.id
+  LEFT JOIN users ru ON d.rejected_by_id = ru.id
 `;
 
 function mapDoc(r: any) {
@@ -55,6 +56,7 @@ function mapDoc(r: any) {
     phone: r.phone_number,
     email: r.email,
     issuedByName: r.issued_by_first ? `${r.issued_by_first} ${r.issued_by_last ?? ''}`.trim() : null,
+    rejectedByName: r.rejected_by_first ? `${r.rejected_by_first} ${r.rejected_by_last ?? ''}`.trim() : null,
   };
 }
 
@@ -273,9 +275,11 @@ export class DocumentsService {
     const docNumber = updated.docNumber;
 
     const label = DOC_TYPE_LABELS[doc.doc_type as DocType] ?? doc.doc_type;
+    const issuer = await db.prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(reviewedById) as any;
+    const issuerName = issuer ? `${issuer.first_name} ${issuer.last_name}`.trim() : 'HR';
     const payload = {
       title: 'Document Ready',
-      message: `Your ${label} is ready to download`,
+      message: `Your ${label} is ready to download (issued by ${issuerName})`,
       type: 'success',
       link: '/documents',
     };
@@ -296,14 +300,16 @@ export class DocumentsService {
     if (!doc) throw new AppError(404, 'Document request not found');
     if (doc.status !== 'pending') throw new AppError(409, `Only pending requests can be rejected (current status: ${doc.status})`);
 
-    await db.prepare("UPDATE document_requests SET status = 'rejected', reject_reason = ?, updated_at = NOW() WHERE id = ?")
-      .run(reason ?? null, id);
+    await db.prepare("UPDATE document_requests SET status = 'rejected', reject_reason = ?, rejected_by_id = ?, updated_at = NOW() WHERE id = ?")
+      .run(reason ?? null, reviewedById, id);
     const updated = mapDoc(await db.prepare(`${SELECT} WHERE d.id = ?`).get(id));
 
     const label = DOC_TYPE_LABELS[doc.doc_type as DocType] ?? doc.doc_type;
+    const reviewer = await db.prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(reviewedById) as any;
+    const reviewerName = reviewer ? `${reviewer.first_name} ${reviewer.last_name}`.trim() : 'An admin';
     const payload = {
       title: 'Document Request Rejected',
-      message: reason ? `Your ${label} request was rejected: ${reason}` : `Your ${label} request was rejected`,
+      message: reason ? `Your ${label} request was rejected by ${reviewerName}: ${reason}` : `Your ${label} request was rejected by ${reviewerName}`,
       type: 'warning',
       link: '/documents',
     };

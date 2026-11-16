@@ -7,10 +7,21 @@ import { MessagesService } from './messages.service.js';
 const router = Router();
 router.use(authenticate);
 
-/** List threads (employee: own thread; admin: all threads). */
+/** List threads (employee: own thread; admin: all active employees + any existing thread). */
 router.get('/threads', async (req: Request, res: Response, next: NextFunction) => {
   try {
     res.json(await MessagesService.listThreads(req.user!.sub, req.user!.accessLevel));
+  } catch (err) { next(err); }
+});
+
+/** Admin-only: ensure a thread exists for the given employee and return its id. */
+router.post('/threads/ensure/:employeeId', requireUuid('employeeId'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (req.user!.accessLevel !== 'director' && req.user!.accessLevel !== 'hr') {
+      return next(new (await import('../../lib/app-error.js')).AppError(403, 'Only director or HR can start a chat'));
+    }
+    const threadId = await MessagesService.ensureThread(req.params.employeeId!);
+    res.json({ threadId });
   } catch (err) { next(err); }
 });
 

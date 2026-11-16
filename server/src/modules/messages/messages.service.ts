@@ -2,6 +2,7 @@ import db, { uuid } from '../../db/index.js';
 import { getIO } from '../../lib/socket.js';
 import { AppError } from '../../lib/app-error.js';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service.js';
+import { encryptText, decryptText } from '../../lib/crypto.js';
 
 export class MessagesService {
   /** Find or create the single thread for this employee (employee + all active HR/director). */
@@ -29,20 +30,24 @@ export class MessagesService {
   static async listThreads(userId: string, accessLevel: string) {
     const isAdmin = accessLevel === 'director' || accessLevel === 'hr';
     if (isAdmin) {
-      const rowsFixed = await db.prepare(`
-        SELECT t.id AS threadId, t.updated_at AS updatedAt,
-               emp.id AS employeeId, emp.first_name AS employeeFirstName, emp.last_name AS employeeLastName,
+      // All active employees — thread info joined if it exists (click to start)
+      const rows = await db.prepare(`
+        SELECT emp.id AS employeeId, emp.first_name AS employeeFirstName, emp.last_name AS employeeLastName,
                emp.employee_id AS employeeCode, emp.profile_picture_url AS profilePictureUrl,
+               t.id AS threadId, t.updated_at AS updatedAt,
                (SELECT content FROM messages m WHERE m.thread_id = t.id ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS lastMessage,
-               (SELECT COUNT(*) FROM messages m WHERE m.thread_id = t.id AND m.sender_id != ? AND COALESCE((SELECT last_read_at FROM thread_participants tp2 WHERE tp2.thread_id = t.id AND tp2.user_id = ?), '1970-01-01') < m.created_at) AS unread
-        FROM message_threads t
-        JOIN thread_participants tpEmp ON tpEmp.thread_id = t.id
-        JOIN users emp ON emp.id = tpEmp.user_id
-        JOIN roles r ON r.name = emp.role
-        WHERE r.access_level = 'employee'
-        ORDER BY t.updated_at DESC
+               COALESCE((
+                 SELECT COUNT(*) FROM messages m WHERE m.thread_id = t.id AND m.sender_id != ?
+                   AND COALESCE((SELECT last_read_at FROM thread_participants tp2 WHERE tp2.thread_id = t.id AND tp2.user_id = ?), '1970-01-01') < m.created_at
+               ), 0) AS unread
+        FROM users emp
+        JOIN roles r ON r.name = emp.role AND r.access_level = 'employee'
+        LEFT JOIN thread_participants tpEmp ON tpEmp.user_id = emp.id
+        LEFT JOIN message_threads t ON t.id = tpEmp.thread_id
+        WHERE emp.status = 'active'
+        ORDER BY (t.updated_at IS NULL) ASC, t.updated_at DESC, emp.first_name ASC
       `).all(userId, userId) as any[];
-      return { threads: rowsFixed.map((r) => ({ ...r, unread: Number(r.unread ?? 0) })) };
+      return { threads: rows.map((r) => ({ ...r, lastMessage: r.lastMessage ? decryptText(r.lastMessage) : null, unread: Number(r.unread ?? 0) })) };
     }
 
     // Employee view: their own single thread
@@ -53,7 +58,7 @@ export class MessagesService {
              (SELECT COUNT(*) FROM messages m WHERE m.thread_id = t.id AND m.sender_id != ? AND COALESCE((SELECT last_read_at FROM thread_participants tp2 WHERE tp2.thread_id = t.id AND tp2.user_id = ?), '1970-01-01') < m.created_at) AS unread
       FROM message_threads t WHERE t.id = ?
     `).get(userId, userId, threadId) as any;
-    return { threads: row ? [{ ...row, unread: Number(row.unread ?? 0), employeeId: userId }] : [] };
+    return { threads: row ? [{ ...row, lastMessage: row.lastMessage ? decryptText(row.lastMessage) : null, unread: Number(row.unread ?? 0), employeeId: userId }] : [] };
   }
 
   static async getMessages(threadId: string, userId: string, accessLevel: string) {
@@ -65,7 +70,7 @@ export class MessagesService {
       WHERE m.thread_id = ?
       ORDER BY m.created_at ASC, m.id ASC
     `).all(threadId) as any[];
-    return { threadId, messages: rows };
+    return { threadId, messages: rows.map((m) => ({ ...m, content: decryptText(m.content) })) };
   }
 
   static async send(threadId: string, senderId: string, content: string, senderRole?: string) {
@@ -75,8 +80,9 @@ export class MessagesService {
     await MessagesService.assertParticipant(threadId, senderId, senderRole);
 
     const id = uuid();
+    const encrypted = encryptText(trimmed);
     await db.transaction(async () => {
-      await db.prepare('INSERT INTO messages (id, thread_id, sender_id, content) VALUES (?, ?, ?, ?)').run(id, threadId, senderId, trimmed);
+      await db.prepare('INSERT INTO messages (id, thread_id, sender_id, content) VALUES (?, ?, ?, ?)').run(id, threadId, senderId, encrypted);
       await db.prepare('UPDATE message_threads SET updated_at = NOW() WHERE id = ?').run(threadId);
     })();
 

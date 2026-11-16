@@ -85,6 +85,8 @@ function mapExtraWork(r: any) {
     hours: Number(r.hours),
     notes: r.notes,
     accepted: !!r.accepted,
+    acceptedById: r.accepted_by_id ?? null,
+    acceptedByName: r.accepted_by_name ?? (r.accepted_first_name ? `${r.accepted_first_name} ${r.accepted_last_name}`.trim() : null),
     firstName: r.first_name,
     lastName: r.last_name,
     employeeId: r.employee_id,
@@ -353,8 +355,11 @@ export class AttendanceService {
   /** Employee's own latest check-in permission request status (for today) + any missed check-out from a previous day. */
   static async getMyCorrectionRequest(userId: string) {
     const row = await db.prepare(
-      `SELECT id, status, reason, review_comment, requested_at, reviewed_at
-       FROM attendance_correction_requests WHERE user_id = ? ORDER BY requested_at DESC LIMIT 1`
+      `SELECT cr.id, cr.status, cr.reason, cr.review_comment, cr.requested_at, cr.reviewed_at, cr.reviewed_by_id,
+              u.first_name AS reviewer_first_name, u.last_name AS reviewer_last_name
+       FROM attendance_correction_requests cr
+       LEFT JOIN users u ON u.id = cr.reviewed_by_id
+       WHERE cr.user_id = ? ORDER BY cr.requested_at DESC LIMIT 1`
     ).get(userId) as any;
 
     const today = getISTDate();
@@ -467,8 +472,8 @@ export class AttendanceService {
 
   static async getExtraWorkById(id: string) {
     const row = await db.prepare(
-      `SELECT xw.*, u.first_name, u.last_name, u.employee_id
-       FROM attendance_extra_work xw JOIN users u ON u.id = xw.user_id WHERE xw.id = ?`
+      `SELECT xw.*, u.first_name, u.last_name, u.employee_id, a.first_name AS accepted_first_name, a.last_name AS accepted_last_name
+       FROM attendance_extra_work xw JOIN users u ON u.id = xw.user_id LEFT JOIN users a ON a.id = xw.accepted_by_id WHERE xw.id = ?`
     ).get(id) as any;
     if (!row) throw new AppError(404, 'Extra work entry not found');
     return mapExtraWork(row);
@@ -489,7 +494,7 @@ export class AttendanceService {
     if (input.accepted !== undefined) { conds.push('xw.accepted = ?'); params.push(input.accepted ? 1 : 0); }
     const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
     const rows = await db.prepare(
-      `SELECT xw.*, u.first_name, u.last_name, u.employee_id FROM attendance_extra_work xw JOIN users u ON u.id = xw.user_id ${where} ORDER BY xw.date DESC`
+      `SELECT xw.*, u.first_name, u.last_name, u.employee_id, a.first_name AS accepted_first_name, a.last_name AS accepted_last_name FROM attendance_extra_work xw JOIN users u ON u.id = xw.user_id LEFT JOIN users a ON a.id = xw.accepted_by_id ${where} ORDER BY xw.date DESC`
     ).all(...params) as any[];
     const totalHours = rows.reduce((sum, r) => sum + Number(r.hours), 0);
     return { entries: rows.map(mapExtraWork), totalHours: Math.round(totalHours * 100) / 100 };
@@ -499,10 +504,12 @@ export class AttendanceService {
     const row = await db.prepare('SELECT * FROM attendance_extra_work WHERE id = ?').get(id) as any;
     if (!row) throw new AppError(404, 'Extra work entry not found');
     if (row.accepted) throw new AppError(409, 'Already accepted');
-    await db.prepare('UPDATE attendance_extra_work SET accepted = 1, updated_at = NOW() WHERE id = ? AND accepted = 0').run(id);
+    await db.prepare('UPDATE attendance_extra_work SET accepted = 1, accepted_by_id = ?, updated_at = NOW() WHERE id = ? AND accepted = 0').run(reviewerId, id);
     try { await ActivityLogsService.createDiff(reviewerId, 'accept_extra_work', 'attendance', id, `Accepted ${row.hours}h extra work on ${row.date}`); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
+    const reviewer = await db.prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(reviewerId) as any;
+    const reviewerName = reviewer ? `${reviewer.first_name} ${reviewer.last_name}`.trim() : 'An admin';
     await db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(uuid(), row.user_id, reviewerId, 'Extra work accepted', `Your extra work of ${row.hours}h on ${row.date} was accepted`, 'success', '/attendance');
+      .run(uuid(), row.user_id, reviewerId, 'Extra work accepted', `Your extra work of ${row.hours}h on ${row.date} was accepted by ${reviewerName}`, 'success', '/attendance');
     await invalidateAttendanceCache();
     return { message: 'Extra work accepted' };
   }

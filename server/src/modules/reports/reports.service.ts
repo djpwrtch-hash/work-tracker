@@ -9,6 +9,7 @@ function mapReport(r: any) {
     tomorrowPlan: r.tomorrow_plan, status: r.status, feedback: r.feedback,
     submittedAt: r.submitted_at ?? null,
     reviewedById: r.reviewed_by_id, reviewedAt: r.reviewed_at,
+    reviewerFirstName: r.reviewer_first_name ?? null, reviewerLastName: r.reviewer_last_name ?? null,
     createdAt: r.created_at, updatedAt: r.updated_at,
     firstName: r.first_name, lastName: r.last_name, employeeId: r.employee_id,
   };
@@ -60,7 +61,7 @@ export class ReportsService {
 
     const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
     const count = (await db.prepare(`SELECT count(*) as c FROM work_reports wr ${where}`).get(...params) as any).c;
-    const reports = await db.prepare(`SELECT wr.*, u.first_name, u.last_name, u.employee_id FROM work_reports wr JOIN users u ON wr.user_id = u.id ${where} ORDER BY wr.date DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+    const reports = await db.prepare(`SELECT wr.*, u.first_name, u.last_name, u.employee_id, rv.first_name AS reviewer_first_name, rv.last_name AS reviewer_last_name FROM work_reports wr JOIN users u ON wr.user_id = u.id LEFT JOIN users rv ON rv.id = wr.reviewed_by_id ${where} ORDER BY wr.date DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
     return { reports: reports.map(mapReport), total: count, page, limit };
   }
 
@@ -170,6 +171,6 @@ export class ReportsService {
     if (startDate) { conds.push('wr.date >= ?'); params.push(startDate); }
     if (endDate) { conds.push('wr.date <= ?'); params.push(endDate); }
     const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
-    return (await db.prepare(`SELECT wr.*, u.first_name, u.last_name, u.employee_id FROM work_reports wr JOIN users u ON wr.user_id = u.id ${where} ORDER BY wr.date DESC`).all(...params)).map(mapReport);
+    return (await db.prepare(`SELECT wr.*, u.first_name, u.last_name, u.employee_id, rv.first_name AS reviewer_first_name, rv.last_name AS reviewer_last_name FROM work_reports wr JOIN users u ON wr.user_id = u.id LEFT JOIN users rv ON rv.id = wr.reviewed_by_id ${where} ORDER BY wr.date DESC`).all(...params)).map(mapReport);
   }
 }

@@ -20,6 +20,7 @@ function mapPlan(p: any, items: any[] = []) {
     priority: p.priority, estimatedHours: p.estimated_hours, status: p.status,
     submittedAt: p.submitted_at ?? null,
     reviewComment: p.review_comment, reviewedById: p.reviewed_by_id, reviewedAt: p.reviewed_at,
+    reviewerFirstName: p.reviewer_first_name ?? null, reviewerLastName: p.reviewer_last_name ?? null,
     createdAt: p.created_at, updatedAt: p.updated_at,
     firstName: p.first_name, lastName: p.last_name, employeeId: p.employee_id,
     items: (items ?? []).map((it: any) => ({
@@ -46,7 +47,7 @@ async function loadPlanItemsForIds(planIds: string[]) {
 }
 
 async function loadPlan(planId: string) {
-  const row = await db.prepare('SELECT p.*, u.first_name, u.last_name, u.employee_id FROM work_plans p JOIN users u ON p.user_id = u.id WHERE p.id = ?').get(planId) as any;
+  const row = await db.prepare('SELECT p.*, u.first_name, u.last_name, u.employee_id, r.first_name AS reviewer_first_name, r.last_name AS reviewer_last_name FROM work_plans p JOIN users u ON p.user_id = u.id LEFT JOIN users r ON r.id = p.reviewed_by_id WHERE p.id = ?').get(planId) as any;
   if (!row) throw new AppError(404, 'Plan not found');
   const items = await loadPlanItems(planId);
   return mapPlan(row, items);
@@ -132,7 +133,7 @@ export class PlansService {
 
     const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
     const count = (await db.prepare(`SELECT count(*) as c FROM work_plans wp ${where}`).get(...params) as any).c;
-    const plans = await db.prepare(`SELECT wp.*, u.first_name, u.last_name, u.employee_id FROM work_plans wp JOIN users u ON wp.user_id = u.id ${where} ORDER BY FIELD(wp.priority, 'urgent', 'high', 'medium', 'low'), wp.date DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+    const plans = await db.prepare(`SELECT wp.*, u.first_name, u.last_name, u.employee_id, r.first_name AS reviewer_first_name, r.last_name AS reviewer_last_name FROM work_plans wp JOIN users u ON wp.user_id = u.id LEFT JOIN users r ON r.id = wp.reviewed_by_id ${where} ORDER BY FIELD(wp.priority, 'urgent', 'high', 'medium', 'low'), wp.date DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
     const grouped = await loadPlanItemsForIds(plans.map((p: any) => p.id));
     return { plans: plans.map((p: any) => mapPlan(p, grouped[p.id] ?? [])), total: count, page, limit };
   }
@@ -219,8 +220,10 @@ export class PlansService {
       const upd = await db.prepare("UPDATE work_plans SET status = ?, review_comment = ?, reviewed_by_id = ?, reviewed_at = NOW(), updated_at = NOW() WHERE id = ? AND status = 'submitted'")
         .run(status, comments ?? null, reviewedById, id);
       if (upd.changes === 0) throw new AppError(409, 'Already reviewed');
+      const reviewer = await db.prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(reviewedById) as any;
+      const reviewerName = reviewer ? `${reviewer.first_name} ${reviewer.last_name}`.trim() : 'An admin';
       await db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(uuid(), plan.user_id, reviewedById, `Plan ${status}`, `Your work plan has been ${status}`, status === 'approved' ? 'success' : 'warning', `/plans/${id}`);
+        .run(uuid(), plan.user_id, reviewedById, `Plan ${status}`, `Your work plan has been ${status} by ${reviewerName}${comments ? `: ${comments}` : ''}`, status === 'approved' ? 'success' : 'warning', `/plans/${id}`);
       return await loadPlan(id);
     })();
     await cache.delContaining('/api/v1/plans');
@@ -268,7 +271,7 @@ export class PlansService {
     if (startDate) { conds.push('wp.date >= ?'); params.push(startDate); }
     if (endDate) { conds.push('wp.date <= ?'); params.push(endDate); }
     const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
-    const rows = await db.prepare(`SELECT wp.*, u.first_name, u.last_name, u.employee_id FROM work_plans wp JOIN users u ON wp.user_id = u.id ${where} ORDER BY wp.date DESC`).all(...params) as any[];
+    const rows = await db.prepare(`SELECT wp.*, u.first_name, u.last_name, u.employee_id, r.first_name AS reviewer_first_name, r.last_name AS reviewer_last_name FROM work_plans wp JOIN users u ON wp.user_id = u.id LEFT JOIN users r ON r.id = wp.reviewed_by_id ${where} ORDER BY wp.date DESC`).all(...params) as any[];
     const grouped = await loadPlanItemsForIds(rows.map((r) => r.id));
     return rows.map((r) => mapPlan(r, grouped[r.id] ?? []));
   }

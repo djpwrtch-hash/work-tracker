@@ -245,7 +245,7 @@ export default function PlansPage() {
                     ))}
                     {(!p.items || p.items.length === 0) && <p className="text-sm text-white whitespace-pre-wrap">{p.plannedWork}</p>}
                   </ol>
-                  {p.reviewComment && <p className="text-xs text-slate-400 mt-2 italic">Review: {p.reviewComment}</p>}
+                  {p.reviewComment && <p className="text-xs text-slate-400 mt-2 italic">Review{p.reviewerFirstName ? ` (${p.reviewerFirstName} ${p.reviewerLastName ?? ''})` : ''}: {p.reviewComment}</p>}
                   {p.status === 'draft' && <p className="text-[10px] text-slate-500 mt-2 italic">Draft — hidden from reviewers until submitted.</p>}
                   {p.submittedAt && (
                     <p className="text-[10px] text-slate-500 mt-2">

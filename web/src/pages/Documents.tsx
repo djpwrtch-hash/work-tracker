@@ -188,8 +188,8 @@ export default function DocumentsPage() {
           <X className="h-3.5 w-3.5" />Cancel
         </button>
       )}
-      {d.status === 'rejected' && d.rejectReason && (
-        <span className="text-xs text-rose-400" title={d.rejectReason}>Reason: {d.rejectReason}</span>
+      {d.status === 'rejected' && (d.rejectReason || d.rejectedByName) && (
+        <span className="text-xs text-rose-400" title={d.rejectReason ?? undefined}>{d.rejectedByName ? `Rejected by ${d.rejectedByName}` : 'Rejected'}{d.rejectReason ? ` — ${d.rejectReason}` : ''}</span>
       )}
     </>
   );
