@@ -644,6 +644,7 @@ export default function AttendancePage() {
   const [attError, setAttError] = useState('');
   const [gettingLocation, setGettingLocation] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [ipApproximate, setIpApproximate] = useState(false);
   const [capturedLocation, setCapturedLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteText, setDeleteText] = useState('');
@@ -803,6 +804,7 @@ export default function AttendancePage() {
         });
         const updated = res.data;
         setCapturedLocation({ latitude: result.location.latitude, longitude: result.location.longitude });
+        setIpApproximate(result.location.source === 'ip' || result.location.accuracy >= 1000);
         // Cancel any in-flight fetch (e.g. the mutation's onSettled refetch) so it
         // can't overwrite the patched record with a stale pre-PATCH snapshot.
         await qc.cancelQueries({ queryKey: ['todayAtt'] });
@@ -842,6 +844,7 @@ export default function AttendancePage() {
         });
         const updated = res.data;
         setCapturedLocation({ latitude: result.location.latitude, longitude: result.location.longitude });
+        setIpApproximate(result.location.source === 'ip' || result.location.accuracy >= 1000);
         // Cancel any in-flight fetch so it can't overwrite the patched record.
         await qc.cancelQueries({ queryKey: ['todayAtt'] });
         if (updated) {
@@ -1128,6 +1131,21 @@ export default function AttendancePage() {
                     {checkOut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}Check Out
                   </button>
                 </>
+              )}
+              {ipApproximate && (
+                <div className="w-full mt-1 text-xs text-amber-400/80 space-y-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="font-medium">Approximate location (±5 km, IP-based). Enable GPS for an exact fix:</p>
+                    <button onClick={() => setIpApproximate(false)} aria-label="Dismiss" className="text-amber-400/70 hover:text-amber-200 rounded-md px-1.5 leading-none">&times;</button>
+                  </div>
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-300">
+                    <ol className="list-decimal pl-4 space-y-0.5">
+                      <li>Android: <span className="font-semibold">Settings → Apps → Chrome → Permissions → Location → Allow</span>.</li>
+                      <li>Fully close and reopen Chrome, then check in outdoors.</li>
+                    </ol>
+                    <p className="mt-1">Then tap <span className="font-semibold">Retry location</span> below. Or use Enter coordinates manually with exact coords from Google Maps.</p>
+                  </div>
+                </div>
               )}
               {locationError && !today.logout_time && (
                 <div className="w-full mt-1 text-xs text-amber-400/80 space-y-1">
