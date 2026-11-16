@@ -431,3 +431,84 @@ describe('self-edit of own attendance record', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('per-user location isolation', () => {
+  it('stores and returns each user\'s coordinates individually, never shared', async () => {
+    const empA = await createUser({ role: 'employee', password: 'Password123!' });
+    const empB = await createUser({ role: 'employee', password: 'Password123!' });
+    const director = await createUser({ role: 'director', password: 'Password123!' });
+    const { token: tokenA } = await loginAs(empA.email, 'Password123!');
+    const { token: tokenB } = await loginAs(empB.email, 'Password123!');
+    const { token: tokenD } = await loginAs(director.email, 'Password123!');
+
+    await request(app).post('/api/v1/attendance/check-in').set(authHeader(tokenA)).send({ status: 'present' });
+    await request(app).post('/api/v1/attendance/check-in').set(authHeader(tokenB)).send({ status: 'present' });
+
+    const mineA = await request(app).get('/api/v1/attendance/today').set(authHeader(tokenA));
+    const mineB = await request(app).get('/api/v1/attendance/today').set(authHeader(tokenB));
+    expect(mineA.status).toBe(200);
+    expect(mineB.status).toBe(200);
+    const idA = mineA.body.id;
+    const idB = mineB.body.id;
+    expect(idA).not.toBe(idB);
+
+    const coordsA = { latitude: 10.1111, longitude: 20.2222, accuracy: 8, locationCapturedAt: new Date().toISOString() };
+    const coordsB = { latitude: 30.3333, longitude: 40.4444, accuracy: 8, locationCapturedAt: new Date().toISOString() };
+    const patchA = await request(app).patch(`/api/v1/attendance/${idA}`).set(authHeader(tokenA)).send(coordsA);
+    const patchB = await request(app).patch(`/api/v1/attendance/${idB}`).set(authHeader(tokenB)).send(coordsB);
+    expect(patchA.status).toBe(200);
+    expect(patchB.status).toBe(200);
+
+    // Each user's own record returns their own coords
+    const todayA = await request(app).get('/api/v1/attendance/today').set(authHeader(tokenA));
+    const todayB = await request(app).get('/api/v1/attendance/today').set(authHeader(tokenB));
+    expect(Number(todayA.body.latitude)).toBeCloseTo(10.1111, 4);
+    expect(Number(todayA.body.longitude)).toBeCloseTo(20.2222, 4);
+    expect(Number(todayB.body.latitude)).toBeCloseTo(30.3333, 4);
+    expect(Number(todayB.body.longitude)).toBeCloseTo(40.4444, 4);
+
+    // Director's today-all view keeps the two users' coords separate (rows keyed by user id)
+    const todayAll = await request(app).get('/api/v1/attendance/today-all?limit=50').set(authHeader(tokenD));
+    expect(todayAll.status).toBe(200);
+    const rowA = (todayAll.body ?? []).find((r: any) => r.id === empA.id);
+    const rowB = (todayAll.body ?? []).find((r: any) => r.id === empB.id);
+    expect(rowA).toBeDefined();
+    expect(rowB).toBeDefined();
+    expect(Number(rowA.latitude)).toBeCloseTo(10.1111, 4);
+    expect(Number(rowA.longitude)).toBeCloseTo(20.2222, 4);
+    expect(Number(rowB.latitude)).toBeCloseTo(30.3333, 4);
+    expect(Number(rowB.longitude)).toBeCloseTo(40.4444, 4);
+  });
+
+  it('admin editing user A leaves user B coords untouched', async () => {
+    const empA = await createUser({ role: 'employee', password: 'Password123!' });
+    const empB = await createUser({ role: 'employee', password: 'Password123!' });
+    const director = await createUser({ role: 'director', password: 'Password123!' });
+    const { token: tokenA } = await loginAs(empA.email, 'Password123!');
+    const { token: tokenB } = await loginAs(empB.email, 'Password123!');
+    const { token: tokenD } = await loginAs(director.email, 'Password123!');
+
+    await request(app).post('/api/v1/attendance/check-in').set(authHeader(tokenA)).send({ status: 'present' });
+    await request(app).post('/api/v1/attendance/check-in').set(authHeader(tokenB)).send({ status: 'present' });
+
+    const mineA = await request(app).get('/api/v1/attendance/today').set(authHeader(tokenA));
+    const mineB = await request(app).get('/api/v1/attendance/today').set(authHeader(tokenB));
+    const idA = mineA.body.id;
+    const idB = mineB.body.id;
+
+    await request(app).patch(`/api/v1/attendance/${idA}`).set(authHeader(tokenA))
+      .send({ latitude: 10.1111, longitude: 20.2222, accuracy: 8, locationCapturedAt: new Date().toISOString() });
+    await request(app).patch(`/api/v1/attendance/${idB}`).set(authHeader(tokenB))
+      .send({ latitude: 30.3333, longitude: 40.4444, accuracy: 8, locationCapturedAt: new Date().toISOString() });
+
+    // Director edits A only — B must remain unchanged
+    const editA = await request(app).patch(`/api/v1/attendance/${idA}`).set(authHeader(tokenD))
+      .send({ latitude: 15.5555, longitude: 25.6666, accuracy: 5, locationCapturedAt: new Date().toISOString() });
+    expect(editA.status).toBe(200);
+
+    const todayA = await request(app).get('/api/v1/attendance/today').set(authHeader(tokenA));
+    const todayB = await request(app).get('/api/v1/attendance/today').set(authHeader(tokenB));
+    expect(Number(todayA.body.latitude)).toBeCloseTo(15.5555, 4);
+    expect(Number(todayB.body.latitude)).toBeCloseTo(30.3333, 4);
+  });
+});
