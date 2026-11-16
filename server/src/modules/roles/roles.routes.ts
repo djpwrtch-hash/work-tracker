@@ -6,6 +6,7 @@ import { apiCache } from '../../middleware/api-cache.js';
 import { cache } from '../../lib/cache.js';
 import { createRoleSchema, updateRoleSchema } from './roles.schema.js';
 import { RolesService } from './roles.service.js';
+import { ActivityLogsService } from '../activity-logs/activity-logs.service.js';
 
 const router = Router();
 
@@ -33,6 +34,7 @@ router.post('/', requireRole('director', 'hr'), validate(createRoleSchema), asyn
   try {
     const role = await RolesService.create(req.body, req.user!.accessLevel);
     cache.delContaining('/api/v1/roles');
+    try { await ActivityLogsService.createDiff(req.user!.sub, 'create_role', 'role', role?.id ?? null, `Created role ${req.body.name ?? ''} (${req.body.accessLevel ?? ''})`); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     res.status(201).json(role);
   } catch (err) { next(err); }
 });
@@ -41,14 +43,16 @@ router.patch('/:id', requireRole('director', 'hr'), requireUuid('id'), validate(
   try {
     const role = await RolesService.update(req.params.id!, req.body, req.user!.accessLevel);
     cache.delContaining('/api/v1/roles');
+    try { await ActivityLogsService.createDiff(req.user!.sub, 'update_role', 'role', req.params.id!, `Updated role ${req.body.name ?? req.params.id}: ${Object.keys(req.body ?? {}).join(', ')}`); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     res.json(role);
   } catch (err) { next(err); }
 });
 
-router.delete('/:id', requireRole('director', 'hr'), requireUuid('id'), async (req: Request, res: Response, next) => {
+router.delete('/:id', requireRole('director'), requireUuid('id'), async (req: Request, res: Response, next) => {
   try {
     const result = await RolesService.delete(req.params.id!, req.user!.accessLevel);
     cache.delContaining('/api/v1/roles');
+    try { await ActivityLogsService.createDiff(req.user!.sub, 'delete_role', 'role', req.params.id!, 'Deleted role'); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     res.json(result);
   } catch (err) { next(err); }
 });

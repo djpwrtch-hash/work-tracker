@@ -66,6 +66,8 @@ export default function LeavesPage() {
   const [showExport, setShowExport] = useState(false);
   const [form, setForm] = useState({ type: 'casual', startDate: '', endDate: '', reason: '' });
   const [error, setError] = useState('');
+  const [rejectModal, setRejectModal] = useState<{ id: string; type: string } | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
 
   const exportColumns: ExportColumn[] = [
     { id: 'type', label: 'Type' },
@@ -129,6 +131,9 @@ export default function LeavesPage() {
             <span className={totalRemaining < 0 ? 'text-rose-400 font-semibold' : ''}>Total {totalRemaining}</span>
           </span> },
       { header: 'Reason', key: 'reason', render: (l: any) => <span className="text-slate-300 text-xs">{l.reason || '-'}</span> },
+      { header: 'Rejection', key: 'rejection', render: (l: any) => l.status === 'rejected' && l.reviewComment
+        ? <span className="text-rose-400 text-xs">Rejected by <span className="font-semibold">{l.reviewerFirstName} {l.reviewerLastName}</span><br />{l.reviewComment}</span>
+        : <span className="text-slate-600 text-xs">-</span> },
     );
     return cols;
   }, [isAdmin, balance, totalRemaining]);
@@ -244,7 +249,7 @@ export default function LeavesPage() {
 
   const reviewLeave = useMutation({
     retry: 0,
-    mutationFn: async ({ id, status }: { id: string; status: 'approved' | 'rejected' }) => (await api.post(`/leaves/${id}/review`, { status })).data,
+    mutationFn: async ({ id, status, reviewComment }: { id: string; status: 'approved' | 'rejected'; reviewComment?: string }) => (await api.post(`/leaves/${id}/review`, { status, reviewComment })).data,
     onMutate: async ({ id, status }) => {
       await qc.cancelQueries({ queryKey: ['leaves'] });
       const queries = qc.getQueriesData({ queryKey: ['leaves'] });
@@ -358,7 +363,7 @@ export default function LeavesPage() {
               {isAdmin && l.status === 'pending' && (user?.accessLevel === 'director' || l.userId !== user?.id) && (
                 <>
                   <button onClick={() => reviewLeave.mutate({ id: l.id, status: 'approved' })} disabled={reviewLeave.isPending} className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-xs transition disabled:opacity-50">Approve</button>
-                  <button onClick={() => reviewLeave.mutate({ id: l.id, status: 'rejected' })} disabled={reviewLeave.isPending} className="rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 text-xs transition disabled:opacity-50">Reject</button>
+                  <button onClick={() => { setRejectReason(''); setRejectModal({ id: l.id, type: l.type }); }} disabled={reviewLeave.isPending} className="rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 text-xs transition disabled:opacity-50">Reject</button>
                 </>
               )}
               {isAdmin && l.status === 'approved' && (user?.accessLevel === 'director' || l.userId !== user?.id) && (
@@ -383,7 +388,7 @@ export default function LeavesPage() {
             {form.startDate && form.startDate < todayIST && (
               <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm rounded-xl px-4 py-3">Start date cannot be in the past.</div>
             )}
-            <div><label className="block text-sm text-slate-300 mb-1">Reason</label><textarea value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} rows={3} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" /></div>
+            <div><label className="block text-sm text-slate-300 mb-1">Reason <span className="text-rose-400">*</span></label><textarea value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} rows={3} placeholder="Why do you need this leave?" className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" /></div>
             {deductionPrediction && deductionPrediction.hasWarning && (
               <div className={`rounded-xl border px-4 py-3 text-sm space-y-1 ${deductionPrediction.extraDays > 0 ? 'bg-rose-500/10 border-rose-500/20 text-rose-300' : 'bg-amber-500/10 border-amber-500/20 text-amber-300'}`}>
                 {deductionPrediction.warnings.map((w, i) => (
@@ -395,10 +400,23 @@ export default function LeavesPage() {
                 <div className="pt-1 text-xs opacity-80">You can still submit this leave request.</div>
               </div>
             )}
-            <button onClick={() => createLeave.mutate(form)} disabled={!form.startDate || !form.endDate || (form.startDate && form.startDate < todayIST) || createLeave.isPending}
+            <button onClick={() => createLeave.mutate(form)} disabled={!form.startDate || !form.endDate || (form.startDate && form.startDate < todayIST) || !form.reason.trim() || createLeave.isPending}
               className="w-full rounded-xl bg-violet-600 hover:bg-violet-700 text-white py-2.5 text-sm font-semibold transition disabled:opacity-50 flex items-center justify-center gap-2">
               {createLeave.isPending && <Loader2 className="h-4 w-4 animate-spin" />}Submit
             </button>
+          </div>
+        </Modal>
+
+        {/* Reject with mandatory reason */}
+        <Modal open={!!rejectModal} onClose={() => setRejectModal(null)} title="Reject Leave">
+          <div className="space-y-4">
+            <p className="text-sm text-slate-300">Rejecting <span className="font-semibold capitalize">{rejectModal?.type.replace('_', ' ')}</span> leave — the employee will see the reason below.</p>
+            {error && <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm rounded-xl px-4 py-3">{error}</div>}
+            <div>
+              <label className="block text-sm text-slate-300 mb-1">Reason for rejection <span className="text-rose-400">*</span></label>
+              <textarea value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} rows={3} autoFocus placeholder="Why are you rejecting this leave?" className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" />
+            </div>
+            <button onClick={() => { if (rejectModal) reviewLeave.mutate({ id: rejectModal.id, status: 'rejected', reviewComment: rejectReason.trim() }, { onSuccess: () => { setRejectModal(null); setRejectReason(''); } }); }} disabled={!rejectReason.trim() || reviewLeave.isPending} className="w-full rounded-xl bg-rose-600 hover:bg-rose-700 text-white py-2.5 text-sm font-semibold transition disabled:opacity-50 flex items-center justify-center gap-2">{reviewLeave.isPending && <Loader2 className="h-4 w-4 animate-spin" />}Reject Leave</button>
           </div>
         </Modal>
 

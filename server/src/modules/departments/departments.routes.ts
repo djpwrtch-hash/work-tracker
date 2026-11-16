@@ -6,6 +6,7 @@ import { apiCache } from '../../middleware/api-cache.js';
 import { cache } from '../../lib/cache.js';
 import { createDepartmentSchema, updateDepartmentSchema } from './departments.schema.js';
 import { DepartmentsService } from './departments.service.js';
+import { ActivityLogsService } from '../activity-logs/activity-logs.service.js';
 
 const router = Router();
 
@@ -36,6 +37,7 @@ router.post('/', requireRole('director'), validate(createDepartmentSchema), asyn
   try {
     const dept = await DepartmentsService.create(req.body);
     cache.delContaining('/api/v1/departments');
+    try { await ActivityLogsService.createDiff(req.user!.sub, 'create_department', 'department', dept?.id ?? null, `Created department ${req.body.name ?? ''}`); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     res.status(201).json(dept);
   } catch (err) { next(err); }
 });
@@ -44,7 +46,8 @@ router.patch('/:id', requireRole('director'), requireUuid('id'), validate(update
   try {
     const dept = await DepartmentsService.update(req.params.id!, req.body);
     cache.delContaining('/api/v1/departments');
-    res.json(dept);
+    try { await ActivityLogsService.createDiff(req.user!.sub, 'update_department', 'department', req.params.id!, `Updated department ${req.body.name ?? req.params.id}: ${Object.keys(req.body ?? {}).join(', ')}`); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
+    res.status(200).json(dept);
   } catch (err) { next(err); }
 });
 
@@ -52,6 +55,7 @@ router.delete('/:id', requireRole('director'), requireUuid('id'), async (req: Re
   try {
     const result = await DepartmentsService.delete(req.params.id!);
     cache.delContaining('/api/v1/departments');
+    try { await ActivityLogsService.createDiff(req.user!.sub, 'delete_department', 'department', req.params.id!, 'Deleted department'); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     res.json(result);
   } catch (err) { next(err); }
 });

@@ -52,6 +52,10 @@ function isAdminRole(role: string): boolean {
   return role === 'director' || role === 'hr';
 }
 
+function isDirector(role: string): boolean {
+  return role === 'director';
+}
+
 export class FilesService {
   static async upload(userId: string, file: { mimetype: string; size: number; originalname: string; buffer: Buffer }): Promise<any> {
     if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
@@ -108,9 +112,10 @@ export class FilesService {
     if (!row) throw new AppError(404, 'File not found');
 
     const isOwner = row.user_id === userId;
-    const isAdmin = isAdminRole(role);
-    if (!isOwner && !isAdmin) {
-      throw new AppError(403, 'Only the file owner or an admin can delete files');
+    // Director-only delete power (no HR); owner can still delete their own file
+    const isDirector = role === 'director';
+    if (!isOwner && !isDirector) {
+      throw new AppError(403, 'Only the file owner or the director can delete files');
     }
 
     const storage = getStorage();

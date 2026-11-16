@@ -74,6 +74,9 @@ export default function LogsPage() {
       let d: any = l.newValues ?? l.oldValues;
       if (d == null) return <span className="text-slate-500">-</span>;
       try { d = typeof d === 'string' ? JSON.parse(d) : d; } catch { return <span className="text-slate-400 text-xs" title={String(d)}>{String(d).slice(0, 60)}</span>; }
+      if (d && typeof d === 'object' && typeof d.summary === 'string') {
+        return <span className="text-slate-300 text-xs" title={d.summary}>{d.summary.slice(0, 140)}</span>;
+      }
       const text = typeof d === 'object' ? Object.entries(d).map(([k, v]) => `${k}:${v}`).join(', ') : String(d);
       return <span className="text-slate-400 text-xs" title={text}>{text.slice(0, 80)}</span>;
     } },

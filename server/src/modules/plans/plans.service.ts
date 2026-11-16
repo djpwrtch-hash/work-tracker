@@ -233,6 +233,8 @@ export class PlansService {
     if (role === 'employee') {
       if (plan.user_id !== userId) throw new AppError(403, 'Cannot delete others plan');
       if (plan.status !== 'draft') throw new AppError(409, 'Only draft plans can be deleted');
+    } else if (role === 'hr') {
+      throw new AppError(403, 'Only director can delete others plan');
     }
     await db.prepare('DELETE FROM work_plans WHERE id = ?').run(id);
     await cache.delContaining('/api/v1/plans');

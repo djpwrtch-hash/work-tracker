@@ -4,7 +4,7 @@ export const createLeaveSchema = z.object({
   type: z.enum(['casual', 'sick', 'proposal']),
   startDate: z.string().trim().min(1, 'Start date is required').refine((val) => !isNaN(Date.parse(val)), 'Invalid start date format'),
   endDate: z.string().trim().min(1, 'End date is required').refine((val) => !isNaN(Date.parse(val)), 'Invalid end date format'),
-  reason: z.string().trim().min(1, 'Reason is required').max(2000, 'Reason too long').optional(),
+  reason: z.string().trim().min(1, 'Reason is required').max(2000, 'Reason too long'),
 }).refine((data) => {
   const start = new Date(data.startDate);
   const end = new Date(data.endDate);
@@ -31,7 +31,7 @@ export const listLeavesSchema = z.object({
 export const reviewLeaveSchema = z.object({
   status: z.enum(['approved', 'rejected']),
   reviewComment: z.string().trim().optional(),
-});
+}).refine((d) => d.status !== 'rejected' || (!!d.reviewComment && d.reviewComment.trim().length > 0), { message: 'Rejection reason is required', path: ['reviewComment'] });
 
 export type CreateLeaveInput = z.infer<typeof createLeaveSchema>;
 export type ListLeavesInput = z.infer<typeof listLeavesSchema>;

@@ -3,6 +3,7 @@ import { getISTDate, getISTNow, parseUTC } from '../../lib/time.js';
 import { getIO } from '../../lib/socket.js';
 import { cache } from '../../lib/cache.js';
 import { AppError } from '../../lib/app-error.js';
+import { ActivityLogsService } from '../activity-logs/activity-logs.service.js';
 
 const HALF_DAY_THRESHOLD = 4;
 
@@ -167,6 +168,7 @@ export class AttendanceService {
         }
         const rec = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(existing.id);
         logEvent(existing.id, userId, 'check_in', { latitude: input.latitude, longitude: input.longitude, accuracy: input.accuracy, locationCapturedAt: input.locationCapturedAt }, now);
+        try { await ActivityLogsService.createDiff(userId, 'check_in', 'attendance', existing.id, `Checked in${hasLocation ? ' with location' : ''}`); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
         await invalidateAttendanceCache();
         emitAttendanceUpdated(userId, rec);
         return rec;
@@ -188,6 +190,7 @@ export class AttendanceService {
     }
     const rec = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(id);
     logEvent(id, userId, 'check_in', { latitude: input.latitude, longitude: input.longitude, accuracy: input.accuracy, locationCapturedAt: input.locationCapturedAt }, now);
+    try { await ActivityLogsService.createDiff(userId, 'check_in', 'attendance', id, `Checked in${hasLocation ? ' with location' : ''}`); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     await invalidateAttendanceCache();
     emitAttendanceUpdated(userId, rec);
     return rec;
@@ -341,6 +344,7 @@ export class AttendanceService {
           'approval', '/attendance');
       }
     }
+    try { await ActivityLogsService.createDiff(userId, 'check_out', 'attendance', rec.id, `Checked out${input?.latitude !== undefined || input?.longitude !== undefined ? ' with location' : ''}; worked ${Number(updated?.working_hours ?? 0)}h`); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     await invalidateAttendanceCache();
     emitAttendanceUpdated(userId, updated);
     return updated;
@@ -455,6 +459,7 @@ export class AttendanceService {
     await db.prepare(
       'INSERT INTO attendance_extra_work (id, user_id, date, start_time, end_time, hours, notes) VALUES (?, ?, ?, ?, ?, ?, ?)'
     ).run(id, userId, input.date, `${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}:00`, `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}:00`, hours, input.notes ?? null);
+    try { await ActivityLogsService.createDiff(userId, 'create_extra_work', 'attendance', id, `Logged ${hours}h extra work on ${input.date} (${input.startTime}–${input.endTime})`); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     await notifyAdmins(userId, userId, 'Extra work logged', `Extra work of ${hours}h on ${input.date} needs review`, 'approval', '/attendance');
     await invalidateAttendanceCache();
     return this.getExtraWorkById(id);
@@ -495,6 +500,7 @@ export class AttendanceService {
     if (!row) throw new AppError(404, 'Extra work entry not found');
     if (row.accepted) throw new AppError(409, 'Already accepted');
     await db.prepare('UPDATE attendance_extra_work SET accepted = 1, updated_at = NOW() WHERE id = ? AND accepted = 0').run(id);
+    try { await ActivityLogsService.createDiff(reviewerId, 'accept_extra_work', 'attendance', id, `Accepted ${row.hours}h extra work on ${row.date}`); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     await db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(uuid(), row.user_id, reviewerId, 'Extra work accepted', `Your extra work of ${row.hours}h on ${row.date} was accepted`, 'success', '/attendance');
     await invalidateAttendanceCache();
@@ -507,8 +513,11 @@ export class AttendanceService {
     if (accessLevel === 'employee') {
       if (row.user_id !== userId) throw new AppError(403, 'Forbidden');
       if (row.accepted) throw new AppError(409, 'Accepted entries cannot be deleted');
+    } else if (accessLevel === 'hr') {
+      throw new AppError(403, 'Only director can delete extra work entries');
     }
     await db.prepare('DELETE FROM attendance_extra_work WHERE id = ?').run(id);
+    try { await ActivityLogsService.createDiff(userId, 'delete_extra_work', 'attendance', id, `Deleted ${row.hours}h extra work on ${row.date}`); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     await invalidateAttendanceCache();
     return { message: 'Extra work entry deleted' };
   }
@@ -634,7 +643,7 @@ export class AttendanceService {
   }
 
   static async update(id: string, input: any, userId?: string, accessLevel?: string) {
-    const existing = await db.prepare('SELECT id, user_id, login_time, logout_time, pause_start_time, pause_end_time, pause_minutes, working_hours, overtime_hours FROM attendance WHERE id = ?').get(id) as any;
+    const existing = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(id) as any;
     if (!existing) throw new AppError(404, 'Record not found');
     const isAdmin = accessLevel === 'director' || accessLevel === 'hr';
 
@@ -713,6 +722,11 @@ export class AttendanceService {
     await db.prepare(`UPDATE attendance SET ${sets.join(', ')} WHERE id = ?`).run(...params);
     await invalidateAttendanceCache();
     const updated = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(id);
+    // Log a short diff of what changed
+    try {
+      const before = isAdmin ? existing : { latitude: existing.latitude, longitude: existing.longitude, location_accuracy: existing.location_accuracy, location_captured_at: existing.location_captured_at };
+      await ActivityLogsService.createFromDiff(userId ?? null, isAdmin ? 'update_attendance' : 'update_attendance_location', 'attendance', id, before, updated, undefined, undefined);
+    } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     emitAttendanceUpdated(existing.user_id, updated);
     return updated;
   }

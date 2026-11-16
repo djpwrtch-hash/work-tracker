@@ -4,6 +4,7 @@ import { getISTDate, getISTYear, isSundayIST, parseUTC } from '../../lib/time.js
 import { cache } from '../../lib/cache.js';
 import { AppError } from '../../lib/app-error.js';
 import { sendLeaveNotification, isEmailConfigured } from '../../lib/email.js';
+import { ActivityLogsService } from '../activity-logs/activity-logs.service.js';
 
 const LEAVE_BALANCES: Record<'casual' | 'sick' | 'proposal', number> = { casual: 8, sick: 8, proposal: 16 };
 const ANNUAL_LEAVE_ALLOWANCE = LEAVE_BALANCES.casual + LEAVE_BALANCES.sick + LEAVE_BALANCES.proposal; // 32 days per year
@@ -44,6 +45,7 @@ function mapLeave(l: any) {
     id: l.id, userId: l.user_id, type: l.type, startDate: l.start_date, endDate: l.end_date,
     reason: l.reason, status: l.status, reviewComment: l.review_comment,
     reviewedById: l.reviewed_by_id, reviewedAt: l.reviewed_at,
+    reviewerFirstName: l.reviewer_first_name ?? null, reviewerLastName: l.reviewer_last_name ?? null,
     createdAt: l.created_at, updatedAt: l.updated_at,
     firstName: l.first_name, lastName: l.last_name, employeeId: l.employee_id,
     deductedFrom: l.deducted_from, extra: l.extra ?? 0, leaveYear: l.leave_year,
@@ -263,7 +265,7 @@ export class LeavesService {
           await insertNotif.run(uuid(), a.id, userId, 'Leave Requested', `${input.type} leave request pending review`, 'approval', `/leaves/${id}`);
         }
       }
-      return mapLeave(await db.prepare('SELECT l.*, u.first_name, u.last_name, u.employee_id FROM leaves l JOIN users u ON l.user_id = u.id WHERE l.id = ?').get(id));
+      return mapLeave(await db.prepare('SELECT l.*, u.first_name, u.last_name, u.employee_id, r.first_name AS reviewer_first_name, r.last_name AS reviewer_last_name FROM leaves l JOIN users u ON l.user_id = u.id LEFT JOIN users r ON r.id = l.reviewed_by_id WHERE l.id = ?').get(id));
     }))();
     if (!isAutoApprove && isEmailConfigured()) {
       // Emails AFTER commit: gated by isEmailConfigured() — notifications are
@@ -308,7 +310,7 @@ export class LeavesService {
 
     const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
     const count = (await db.prepare(`SELECT count(*) as c FROM leaves l ${where}`).get(...params) as any).c;
-    const leaves = await db.prepare(`SELECT l.*, u.first_name, u.last_name, u.employee_id FROM leaves l JOIN users u ON l.user_id = u.id ${where} ORDER BY l.created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+    const leaves = await db.prepare(`SELECT l.*, u.first_name, u.last_name, u.employee_id, r.first_name AS reviewer_first_name, r.last_name AS reviewer_last_name FROM leaves l JOIN users u ON l.user_id = u.id LEFT JOIN users r ON r.id = l.reviewed_by_id ${where} ORDER BY l.created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
     return { leaves: leaves.map(mapLeave), total: count, page, limit };
   }
 
@@ -392,6 +394,9 @@ export class LeavesService {
   }
 
   static async review(id: string, reviewedById: string, status: string, comments?: string, _role?: string) {
+    if (status === 'rejected' && (!comments || comments.trim().length === 0)) {
+      throw new AppError(400, 'Rejection reason is required');
+    }
     const leave = await db.prepare('SELECT id, user_id, type, start_date, end_date, reason, status FROM leaves WHERE id = ?').get(id) as any;
     if (!leave) throw new AppError(404, 'Leave not found');
     if (leave.user_id === reviewedById) throw new AppError(403, 'Cannot review your own leave request');
@@ -429,8 +434,12 @@ export class LeavesService {
         invalidateAnalyticsCache();
       }
 
+      // Fetch reviewer name for the notification
+      const reviewer = await db.prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(reviewedById) as any;
+      const reviewerName = reviewer ? `${reviewer.first_name} ${reviewer.last_name}`.trim() : 'An admin';
+      const reasonSuffix = status === 'rejected' && comments?.trim() ? `: ${comments.trim()}` : '';
       await db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(uuid(), leave.user_id, reviewedById, `Leave ${status}`, `Your ${leave.type} leave has been ${status}`, status === 'approved' ? 'success' : 'warning', `/leaves/${id}`);
+        .run(uuid(), leave.user_id, reviewedById, `Leave ${status}`, `Your ${leave.type} leave has been ${status} by ${reviewerName}${reasonSuffix}`, status === 'approved' ? 'success' : 'warning', `/leaves/${id}`);
     })();
     // Email AFTER commit — optional: skipped when SMTP not configured; notifications are primary.
     if (isEmailConfigured()) {
@@ -440,7 +449,7 @@ export class LeavesService {
       }
     }
     await cache.delByPrefix(`${leave.user_id}:/api/v1/leaves/balance`);
-    const updated = mapLeave(await db.prepare('SELECT l.*, u.first_name, u.last_name, u.employee_id FROM leaves l JOIN users u ON l.user_id = u.id WHERE l.id = ?').get(id));
+    const updated = mapLeave(await db.prepare('SELECT l.*, u.first_name, u.last_name, u.employee_id, r.first_name AS reviewer_first_name, r.last_name AS reviewer_last_name FROM leaves l JOIN users u ON l.user_id = u.id LEFT JOIN users r ON r.id = l.reviewed_by_id WHERE l.id = ?').get(id));
     try { getIO().to(`user:${leave.user_id}`).emit('leave:reviewed', updated); } catch (e) { console.error('[Leaves] Socket emit failed:', e); }
     return updated;
   }
@@ -473,9 +482,10 @@ export class LeavesService {
         await db.prepare(`UPDATE attendance SET status = 'absent', notes = NULL, updated_at = NOW() WHERE user_id = ? AND status = 'leave' AND date IN (${placeholders})`).run(leave.user_id, ...dates);
       }
       invalidateAnalyticsCache();
-      await db.prepare("INSERT INTO activity_logs (id, actor_id, action, entity_type, entity_id, old_values, new_values, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-        .run(uuid(), userId, 'cancel_leave', 'leave', id, JSON.stringify({ status: leave.status }), JSON.stringify({ status: 'cancelled' }), null);
-      return mapLeave(await db.prepare('SELECT l.id, l.user_id, l.type, l.start_date, l.end_date, l.reason, l.status, l.review_comment, l.reviewed_by_id, l.reviewed_at, l.deducted_from, l.extra, l.leave_year, l.created_at, l.updated_at, u.first_name, u.last_name, u.employee_id FROM leaves l JOIN users u ON l.user_id = u.id WHERE l.id = ?').get(id));
+      try {
+        await ActivityLogsService.createDiff(userId, 'cancel_leave', 'leave', id, `Cancelled ${leave.type} leave (${leave.start_date} → ${leave.end_date})`);
+      } catch (e) { console.error('[ActivityLogs] Failed:', e); }
+      return mapLeave(await db.prepare('SELECT l.id, l.user_id, l.type, l.start_date, l.end_date, l.reason, l.status, l.review_comment, l.reviewed_by_id, l.reviewed_at, l.deducted_from, l.extra, l.leave_year, l.created_at, l.updated_at, u.first_name, u.last_name, u.employee_id, r.first_name AS reviewer_first_name, r.last_name AS reviewer_last_name FROM leaves l JOIN users u ON l.user_id = u.id LEFT JOIN users r ON r.id = l.reviewed_by_id WHERE l.id = ?').get(id));
     })();
     await cache.delByPrefix(`${leave.user_id}:/api/v1/leaves/balance`);
     return result;

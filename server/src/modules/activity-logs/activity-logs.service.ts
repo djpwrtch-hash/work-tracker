@@ -6,6 +6,25 @@ function parseJson(raw: string | null): any {
   try { return JSON.parse(raw); } catch { return null; }
 }
 
+/** Build a short human-readable "field: old → new" summary for changed keys. */
+function buildDiffSummary(before: Record<string, any> | null | undefined, after: Record<string, any> | null | undefined, ignoreKeys: string[] = ['id', 'created_at', 'updated_at', 'employee_id']): string {
+  if (!before || !after) {
+    if (after) return Object.keys(after).filter(k => !ignoreKeys.includes(k)).slice(0, 8).join(', ');
+    return '';
+  }
+  const parts: string[] = [];
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  for (const k of keys) {
+    if (ignoreKeys.includes(k)) continue;
+    const b = before[k];
+    const a = after[k];
+    const bs = b === null || b === undefined ? '' : String(b);
+    const as = a === null || a === undefined ? '' : String(a);
+    if (bs !== as) parts.push(`${k}: ${bs || '—'} → ${as || '—'}`);
+  }
+  return parts.slice(0, 10).join('; ');
+}
+
 export class ActivityLogsService {
   static async create(userId: string | null, action: string, entityType?: string, entityId?: string, details?: Record<string, any>, ipAddress?: string) {
     const id = uuid();
@@ -24,6 +43,38 @@ export class ActivityLogsService {
     await db.prepare('INSERT INTO activity_logs (id, actor_id, actor_email, action, entity_type, entity_id, new_values, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(id, userId, actorEmail, action, entityType ?? null, entityId ?? null, details ? JSON.stringify(details) : null, effectiveIp);
     return await this.getById(id);
+  }
+
+  /**
+   * Create an activity log entry for a mutation, including a short human-readable
+   * summary and a before/after diff.
+   */
+  static async createDiff(
+    userId: string | null,
+    action: string,
+    entityType: string,
+    entityId: string | null | undefined,
+    summary: string,
+    ipAddress?: string,
+  ) {
+    return ActivityLogsService.create(userId, action, entityType, entityId ?? undefined, { summary }, ipAddress);
+  }
+
+  /**
+   * Create an activity log entry with an auto-generated diff summary from a before/after pair.
+   */
+  static async createFromDiff(
+    userId: string | null,
+    action: string,
+    entityType: string,
+    entityId: string | null | undefined,
+    before: Record<string, any> | null | undefined,
+    after: Record<string, any> | null | undefined,
+    extra?: Record<string, any>,
+    ipAddress?: string,
+  ) {
+    const summary = buildDiffSummary(before, after) || (after ? `${action} ${entityType}` : '');
+    return ActivityLogsService.create(userId, action, entityType, entityId ?? undefined, { summary, ...(extra ?? {}) }, ipAddress);
   }
 
   static async list(input: any) {

@@ -130,7 +130,8 @@ export class ReportsService {
     const report = await db.prepare('SELECT * FROM work_reports WHERE id = ?').get(id) as any;
     if (!report) throw new AppError(404, 'Report not found');
     if (role === 'director' || role === 'hr') {
-      // directors and HR can delete any report
+      // Only director can delete others' reports (no HR)
+      if (role === 'hr') throw new AppError(403, 'Only director can delete others report');
     } else {
       if (report.user_id !== userId) throw new AppError(403, 'Cannot delete others report');
       if (report.status !== 'draft') throw new AppError(409, 'Only draft reports can be deleted');

@@ -17,14 +17,14 @@ router.get('/', validate(listActivityLogsSchema, 'query'), async (req: Request, 
   } catch (err) { next(err); }
 });
 
-router.delete('/:id', requireUuid('id'), async (req: Request, res: Response, next) => {
+router.delete('/:id', requireRole('director'), requireUuid('id'), async (req: Request, res: Response, next) => {
   try {
     const result = await ActivityLogsService.deleteById(String(req.params.id));
     res.json(result);
   } catch (err) { next(err); }
 });
 
-router.delete('/', async (req: Request, res: Response, next) => {
+router.delete('/', requireRole('director'), async (req: Request, res: Response, next) => {
   try {
     if (req.query.confirm !== 'DELETE') {
       return res.status(400).json({ error: 'Missing confirm=DELETE' });

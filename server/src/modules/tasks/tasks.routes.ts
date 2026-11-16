@@ -8,6 +8,7 @@ import {
   addCommentSchema, requestApprovalSchema, reviewApprovalSchema,
 } from './tasks.schema.js';
 import { TasksService } from './tasks.service.js';
+import { ActivityLogsService } from '../activity-logs/activity-logs.service.js';
 
 const router = Router();
 
@@ -44,6 +45,7 @@ router.get('/:id', requireUuid('id'), async (req: Request, res: Response, next) 
 router.post('/', requireRole('director', 'hr'), validate(createTaskSchema), async (req: Request, res: Response, next) => {
   try {
     const task = await TasksService.create(req.user!.sub, req.body);
+    try { await ActivityLogsService.createDiff(req.user!.sub, 'create_task', 'task', task.id, `Created task: ${task.title ?? req.body.title ?? ''}`); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     res.status(201).json(task);
   } catch (err) { next(err); }
 });
@@ -58,6 +60,7 @@ router.patch('/approvals/:approvalId', requireRole('director', 'hr'), requireUui
 router.patch('/:id', requireUuid('id'), validate(updateTaskSchema), async (req: Request, res: Response, next) => {
   try {
     const task = await TasksService.update(req.params.id!, req.body, req.user!.sub, req.user!.accessLevel);
+    try { await ActivityLogsService.createDiff(req.user!.sub, 'update_task', 'task', req.params.id!, `Updated task: ${Object.keys(req.body ?? {}).filter(k => k !== 'id').join(', ')}`); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     res.json(task);
   } catch (err) { next(err); }
 });
@@ -65,6 +68,7 @@ router.patch('/:id', requireUuid('id'), validate(updateTaskSchema), async (req: 
 router.delete('/:id', requireRole('director'), requireUuid('id'), async (req: Request, res: Response, next) => {
   try {
     const result = await TasksService.delete(req.params.id!);
+    try { await ActivityLogsService.createDiff(req.user!.sub, 'delete_task', 'task', req.params.id!, 'Deleted task'); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     res.json(result);
   } catch (err) { next(err); }
 });
