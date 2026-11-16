@@ -39,6 +39,7 @@ import analyticsRoutes from './modules/analytics/analytics.routes.js';
 import systemRoutes from './modules/system/system.routes.js';
 import filesRoutes from './modules/files/files.routes.js';
 import profilePhotoRoutes from './modules/profile-photo/profile-photo.routes.js';
+import messagesRoutes from './modules/messages/messages.routes.js';
 import securityRoutes from './modules/security/security.routes.js';
 
 const swaggerCsp = helmet({
@@ -204,13 +205,13 @@ export function createApp() {
       ).get() as any;
       const version = Number(migration?.version ?? 0);
       const tableCount = Number(tables?.count ?? 0);
-      if (version < 30 || tableCount < 10) {
+      if (version < 31 || tableCount < 10) {
         res.status(503).json({
           status: 'not ready',
           timestamp,
           checks: {
             database: 'ok',
-            schema: version >= 30 ? 'ok' : `migration ${version}/30`,
+            schema: version >= 31 ? 'ok' : `migration ${version}/31`,
             coreTables: `${tableCount}/10`,
           },
         });
@@ -271,6 +272,7 @@ export function createApp() {
   app.use(`${api}/system`, systemRoutes);
   app.use(`${api}/files`, filesRoutes);
   app.use(`${api}/profile-photo`, profilePhotoRoutes);
+  app.use(`${api}/messages`, messagesRoutes);
   app.use(`${api}/security`, securityRoutes);
 
   // API docs are opt-in in production and always protected by HTTP Basic auth.

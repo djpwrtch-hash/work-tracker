@@ -27,6 +27,7 @@ const Logs = lazy(() => import('./pages/Logs'));
 const Security = lazy(() => import('./pages/Security'));
 const Profile = lazy(() => import('./pages/Profile'));
 const Notifications = lazy(() => import('./pages/Notifications'));
+const Chat = lazy(() => import('./pages/Chat'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 
 function withSuspense(element: ReactNode, fallback: ReactNode = null) {
@@ -58,6 +59,7 @@ export default function AppRoutes() {
       <Route path="/logs" element={<RequireRole roles={['director', 'hr']}>{withSuspense(<Logs />)}</RequireRole>} />
       <Route path="/security" element={<RequireRole roles={['director']}>{withSuspense(<Security />)}</RequireRole>} />
       <Route path="/profile" element={withSuspense(<Profile />)} />
+      <Route path="/chat" element={withSuspense(<Chat />)} />
       <Route path="/notifications" element={withSuspense(<Notifications />)} />
       <Route path="*" element={withSuspense(<NotFound />)} />
     </Routes>

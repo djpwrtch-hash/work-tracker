@@ -672,6 +672,42 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       await db.exec("UPDATE refresh_tokens SET replaced_by = NULL");
     },
   },
+  {
+    version: 31,
+    name: 'messages',
+    up: async () => {
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS message_threads (
+          id VARCHAR(36) PRIMARY KEY,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB;
+      `);
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS thread_participants (
+          thread_id VARCHAR(36) NOT NULL,
+          user_id VARCHAR(36) NOT NULL,
+          joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          last_read_at DATETIME NULL,
+          PRIMARY KEY (thread_id, user_id),
+          FOREIGN KEY (thread_id) REFERENCES message_threads(id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB;
+      `);
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS messages (
+          id VARCHAR(36) PRIMARY KEY,
+          thread_id VARCHAR(36) NOT NULL,
+          sender_id VARCHAR(36) NOT NULL,
+          content TEXT NOT NULL,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (thread_id) REFERENCES message_threads(id) ON DELETE CASCADE,
+          FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+          INDEX idx_messages_thread (thread_id, created_at)
+        ) ENGINE=InnoDB;
+      `);
+    },
+  },
 ];
 
 await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (

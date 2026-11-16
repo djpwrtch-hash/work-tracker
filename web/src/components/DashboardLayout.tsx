@@ -9,8 +9,10 @@ import NotificationBell from './NotificationBell';
 import {
   LayoutDashboard, CalendarCheck, ClipboardList, FileText, CalendarDays,
   LogOut, Menu, History, Users, Building2, UserCog, BarChart3,
-  Sun, ScrollText, Settings, FileBadge, Database, FolderOpen, Shield, ShieldCheck,
+  Sun, ScrollText, Settings, FileBadge, Database, FolderOpen, Shield, ShieldCheck, MessageCircle,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../lib/api';
 
 const Sidebar = ({ mobile = false, nav, pathname, handleMobileClose, user, logout }: { mobile?: boolean; nav: any[]; pathname: string; handleMobileClose: () => void; user: any; logout: () => void }) => (
   <div className={`flex flex-col h-full ${mobile ? 'w-72' : 'w-64'} bg-slate-900 border-r border-slate-800`}>
@@ -26,14 +28,19 @@ const Sidebar = ({ mobile = false, nav, pathname, handleMobileClose, user, logou
             className={`flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-xl transition ${active ? 'bg-violet-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
             aria-label={n.name}
             aria-current={active ? 'page' : undefined}>
-            <n.icon className="h-5 w-5" />{n.name}
+            <n.icon className="h-5 w-5" /><span className="flex-1 truncate">{n.name}</span>
+            {n.badge && n.badge > 0 && (
+              <span className="ml-auto inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                {n.badge > 99 ? '99+' : n.badge}
+              </span>
+            )}
           </Link>
         );
       })}
     </nav>
     <div className="border-t border-slate-800 p-4">
       <div className="flex items-center gap-3 mb-3">
-        <Avatar user={user} size="md" />
+        <Avatar user={user} size="md" currentUserId={user?.id} />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-white truncate">{user?.firstName} {user?.lastName}</p>
           <p className="text-xs text-slate-400">{user?.role ? displayRole(user.role) : ''}</p>
@@ -47,7 +54,7 @@ const Sidebar = ({ mobile = false, nav, pathname, handleMobileClose, user, logou
 );
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { user, logout } = useAuth();
+  const { user, logout, loading } = useAuth();
   const { pathname } = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [pageTitle, setPageTitle] = useState('');
@@ -79,6 +86,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const isHr = user?.accessLevel === 'hr';
   const isAdminOrHr = isAdmin || isHr;
 
+  const { data: unreadChat } = useQuery({
+    queryKey: ['chatUnread'],
+    queryFn: async () => (await api.get('/messages/threads/unread-count')).data?.count ?? 0,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+    enabled: !loading && !!user,
+  });
+
   const nav = useMemo(() => [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, show: true },
     { name: 'Attendance', href: '/attendance', icon: CalendarCheck, show: true },
@@ -97,8 +112,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { name: 'Analytics', href: '/analytics', icon: BarChart3, show: isAdminOrHr },
     { name: 'Activity Logs', href: '/logs', icon: ScrollText, show: isAdminOrHr },
     { name: 'Security', href: '/security', icon: Shield, show: isAdmin },
+    { name: 'Chat', href: '/chat', icon: MessageCircle, show: true, badge: unreadChat ?? 0 },
     { name: 'Profile', href: '/profile', icon: Settings, show: true },
-  ], [isAdminOrHr, isAdmin]);
+  ], [isAdminOrHr, isAdmin, unreadChat]);
 
   const handleMobileClose = useCallback(() => setMobileOpen(false), []);
 
@@ -125,7 +141,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
           <div className="flex items-center gap-3 flex-shrink-0">
             <NotificationBell />
-            <Avatar user={user} size="sm" />
+            <Avatar user={user} size="sm" currentUserId={user?.id} />
           </div>
         </header>
         <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 safe-bottom">

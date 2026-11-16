@@ -243,7 +243,7 @@ export default function EmployeeDatabasePage() {
                   className={`w-full text-left rounded-xl border px-3 py-2.5 transition ${selectedId === u.id ? 'bg-violet-600/15 border-violet-500/40' : 'bg-slate-800/40 border-slate-800 hover:border-slate-700'}`}
                 >
                   <div className="flex items-center gap-3">
-                    <Avatar user={u} size="md" />
+                    <Avatar user={u} size="md" currentUserId={user?.id} />
                     <div className="min-w-0">
                       <p className="text-sm text-white font-medium truncate">{u.firstName} {u.lastName}</p>
                       <p className="text-xs text-slate-500 truncate">{u.employeeId} · {u.designation ?? '-'}</p>
@@ -265,7 +265,7 @@ export default function EmployeeDatabasePage() {
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex items-center gap-4 min-w-0">
-                    <Avatar user={selected} size="lg" />
+                    <Avatar user={selected} size="lg" currentUserId={user?.id} />
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <h2 className="text-lg font-bold text-white">{selected.firstName} {selected.lastName}</h2>

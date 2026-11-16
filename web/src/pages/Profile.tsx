@@ -122,7 +122,7 @@ export default function ProfilePage() {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
             <div className="flex items-start gap-6">
               <div className="flex flex-col items-center gap-2 flex-shrink-0">
-                <Avatar user={user} size="lg" />
+                <Avatar user={user} size="lg" currentUserId={user?.id} />
                 <div className="flex gap-1.5">
                   <button type="button" onClick={() => photoInputRef.current?.click()} disabled={uploadPhoto.isPending} aria-label="Upload photo" title="Upload photo"
                     className="rounded-lg border border-violet-500/40 text-violet-300 hover:bg-violet-500/10 p-1.5 transition disabled:opacity-50">
