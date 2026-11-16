@@ -664,6 +664,14 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       await db.exec("UPDATE users SET location_enabled = COALESCE(location_enabled, 1), ip_enabled = COALESCE(ip_enabled, 1)");
     },
   },
+  {
+    version: 30,
+    name: 'refresh-token-rotated-by',
+    up: async () => {
+      await addColumnIfMissing('refresh_tokens', 'replaced_by', 'replaced_by VARCHAR(36) NULL');
+      await db.exec("UPDATE refresh_tokens SET replaced_by = NULL");
+    },
+  },
 ];
 
 await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (

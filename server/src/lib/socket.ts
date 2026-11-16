@@ -101,6 +101,12 @@ export function initializeSocket(httpServer: HttpServer) {
     console.log(`[Socket] User ${user.sub} connected (total: ${prevUserCount + 1})`);
     socket.join(`user:${user.sub}`);
 
+    // Admins/directors join a shared room so they receive real-time attendance updates
+    // from any employee (check-in, check-out, location save, edits).
+    if (user.role === 'director' || user.role === 'hr') {
+      socket.join('admins');
+    }
+
     socket.on('join-user', (userId: string) => {
       if (userId === user.sub) {
         socket.join(`user:${userId}`);

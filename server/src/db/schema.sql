@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   user_agent TEXT,
   ip_address VARCHAR(45),
   revoked_at DATETIME,
+  replaced_by VARCHAR(36) NULL,
   expires_at DATETIME NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

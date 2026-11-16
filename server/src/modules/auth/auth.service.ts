@@ -239,27 +239,47 @@ export class AuthService {
 
     const stored = await db.prepare('SELECT * FROM refresh_tokens WHERE user_id = ? AND id = ?').get(payload.sub, payload.tokenId) as any;
     if (!stored) throw new AppError(401, 'Refresh token revoked');
-    if (stored.revoked_at && parseUTC(stored.revoked_at) <= new Date()) {
-      // Replay of an already-revoked token: revoke every session for this user.
-      await db.transaction(async () => {
-        await revokeUserTokens(payload.sub);
-await db.prepare("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ?").run(payload.sub);
-      })();
-      throw new AppError(401, 'Refresh token revoked');
-    }
     if (parseUTC(stored.expires_at) < new Date()) throw new AppError(401, 'Refresh token expired');
     if (!verifyTokenHash(rawToken, stored.token_hash)) throw new AppError(401, 'Token mismatch');
 
     return await db.transaction(async () => {
       // Atomically check and revoke inside transaction to prevent TOCTOU race
-      const current = await db.prepare('SELECT revoked_at FROM refresh_tokens WHERE id = ? FOR UPDATE').get(stored.id) as any;
-      if (current?.revoked_at) throw new AppError(401, 'Refresh token already used');
+      const current = await db.prepare('SELECT revoked_at, replaced_by FROM refresh_tokens WHERE id = ? FOR UPDATE').get(stored.id) as any;
 
-      await db.prepare("UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = ?").run(stored.id);
+      if (current?.revoked_at) {
+        // Idempotent refresh: if this token was just rotated (within the grace window) and its
+        // replacement is still valid, rotate the replacement forward instead of failing.
+        // This covers the two-tabs race where both call /auth/refresh with the same cookie.
+        const GRACE_MS = 10_000;
+        const revokedAt = parseUTC(current.revoked_at);
+        if (current.replaced_by && revokedAt && (Date.now() - revokedAt.getTime()) < GRACE_MS) {
+          const repl = await db.prepare('SELECT * FROM refresh_tokens WHERE id = ? FOR UPDATE').get(current.replaced_by) as any;
+          if (repl && !repl.revoked_at && parseUTC(repl.expires_at) > new Date()) {
+            await db.prepare("UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = ?").run(repl.id);
+            const newTokenId = uuid();
+            const newRawRefresh = signRefreshToken(payload.sub, newTokenId);
+            const newHash = hashToken(newRawRefresh);
+            await db.prepare(`INSERT INTO refresh_tokens (id, user_id, token_hash, user_agent, ip_address, expires_at) VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))`)
+              .run(newTokenId, payload.sub, newHash, repl.user_agent, repl.ip_address, config.jwtRefreshTtlDays);
+            // Chain the replacement's replaced_by to the new token so further races keep working
+            await db.prepare('UPDATE refresh_tokens SET replaced_by = ? WHERE id = ?').run(newTokenId, repl.id);
+            const user = await db.prepare('SELECT id, email, role, status FROM users WHERE id = ?').get(payload.sub) as any;
+            if (!user) throw new AppError(401, 'User not found');
+            if (user.status !== 'active') throw new AppError(403, 'Account is not active');
+            return { accessToken: signAccessToken(user.id, user.email, user.role), refreshToken: newRawRefresh };
+          }
+        }
+        // Outside the grace window (or replacement unusable): treat as replay → revoke all sessions
+        await revokeUserTokens(payload.sub);
+        await db.prepare("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = ?").run(payload.sub);
+        throw new AppError(401, 'Refresh token revoked');
+      }
 
+      // Normal rotation: revoke the used token and issue a fresh one
       const newTokenId = uuid();
       const newRawRefresh = signRefreshToken(payload.sub, newTokenId);
       const newHash = hashToken(newRawRefresh);
+      await db.prepare("UPDATE refresh_tokens SET revoked_at = NOW(), replaced_by = ? WHERE id = ?").run(newTokenId, stored.id);
       await db.prepare(`INSERT INTO refresh_tokens (id, user_id, token_hash, user_agent, ip_address, expires_at) VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))`)
         .run(newTokenId, payload.sub, newHash, stored.user_agent, stored.ip_address, config.jwtRefreshTtlDays);
 

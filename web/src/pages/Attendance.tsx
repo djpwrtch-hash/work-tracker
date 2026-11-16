@@ -486,6 +486,7 @@ export default function AttendancePage() {
     queryKey: ['todayAll'],
     queryFn: async () => (await api.get('/attendance/today-all', { params: { limit: 50 } })).data,
     refetchInterval: 30000,
+    refetchOnWindowFocus: true,
     enabled: !loading && !!user && isAdmin,
   });
 
@@ -1181,12 +1182,6 @@ export default function AttendancePage() {
                   <LogIn className="h-4 w-4" />Check in to override
                 </span>
               )}
-              {isAdmin && (
-                <button onClick={() => startEdit(today)} aria-label="Edit today's attendance" title="Edit today's attendance"
-                  className="flex items-center gap-2 rounded-xl border border-violet-500/40 text-violet-300 hover:bg-violet-500/10 px-4 py-2 text-sm font-medium transition whitespace-nowrap">
-                  <Pencil className="h-4 w-4" />Edit
-                </button>
-              )}
             </div>
             {/* Timeline */}
             {todayEvents && todayEvents.length > 0 && (
@@ -1342,36 +1337,13 @@ export default function AttendancePage() {
               rowKey={(u: any) => u.id}
               mobileTitle={(u: any) => <p className="font-semibold text-white text-sm">{u.first_name} {u.last_name} <span className="text-xs text-slate-500 font-normal">({u.employee_id})</span></p>}
               actions={(u: any) => (
-                <div className="flex items-center gap-1">
-                  {u.attendance_id && (
-                    <button onClick={() => startEdit({
-                      id: u.attendance_id,
-                      date: u.date,
-                      first_name: u.first_name,
-                      last_name: u.last_name,
-                      employee_id: u.employee_id,
-                      status: u.today_status ?? 'absent',
-                      login_time: u.login_time,
-                      logout_time: u.logout_time,
-                      pause_start_time: u.pause_start_time,
-                      pause_end_time: u.pause_end_time,
-                      pause_minutes: u.pause_minutes,
-                      working_hours: u.working_hours,
-                      overtime_hours: u.overtime_hours,
-                      notes: u.notes,
-                    })} aria-label={`Edit ${u.first_name}'s attendance`} title="Edit today's attendance"
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-violet-500/15 text-slate-500 hover:text-violet-300 transition text-xs font-medium">
-                      <Pencil className="h-4 w-4" />Edit
-                    </button>
-                  )}
-                  <button onClick={() => { setHistoryUser(u); setHistoryDateRange(null); setHistoryMonth({ month: now.getMonth() + 1, year: now.getFullYear() }); }}
-                    aria-label={`View ${u.first_name}'s history`}
-                    className="text-slate-500 hover:text-white transition p-1.5 rounded-lg hover:bg-slate-800">
-                    <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-                      <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
-                    </svg>
-                  </button>
-                </div>
+                <button onClick={() => { setHistoryUser(u); setHistoryDateRange(null); setHistoryMonth({ month: now.getMonth() + 1, year: now.getFullYear() }); }}
+                  aria-label={`View ${u.first_name}'s history`}
+                  className="text-slate-500 hover:text-white transition p-1.5 rounded-lg hover:bg-slate-800">
+                  <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                  </svg>
+                </button>
               )}
             />
           </div>
@@ -1460,11 +1432,15 @@ export default function AttendancePage() {
               <p className="text-sm text-slate-500">No records</p>
             )
           }
-          actions={isAdmin ? (r: any) => (
-            <button onClick={() => startEdit(r)} aria-label="Edit attendance" title="Edit attendance" className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-xs font-medium">
-              <Pencil className="h-3.5 w-3.5" />Edit
-            </button>
-          ) : undefined}
+          actions={isAdmin ? (r: any) => {
+            // Edit only past (non-today) records — today's live attendance is not manually editable
+            if (dateOnlyOf(r.date) >= getISTToday(now)) return null;
+            return (
+              <button onClick={() => startEdit(r)} aria-label="Edit attendance" title="Edit attendance" className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-xs font-medium">
+                <Pencil className="h-3.5 w-3.5" />Edit
+              </button>
+            );
+          } : undefined}
         />
         {isAdmin && (
           <div className="flex items-center justify-between flex-wrap gap-3 px-4 py-3 border border-slate-800 rounded-2xl bg-slate-900">

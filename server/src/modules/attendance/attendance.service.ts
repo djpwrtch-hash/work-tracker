@@ -18,6 +18,8 @@ async function invalidateAttendanceCache(): Promise<void> {
 function emitAttendanceUpdated(userId: string, record: any) {
   try {
     getIO().to(`user:${userId}`).emit('attendance:updated', record);
+    // Also notify HR/director admins so their attendance views refresh in real time.
+    getIO().to('admins').emit('attendance:updated', record);
   } catch (e) {
     console.error('[Attendance] Socket emit failed:', e);
   }
