@@ -631,7 +631,7 @@ export class AttendanceService {
   }
 
   static async update(id: string, input: any, userId?: string, accessLevel?: string) {
-    const existing = await db.prepare('SELECT id, user_id FROM attendance WHERE id = ?').get(id) as any;
+    const existing = await db.prepare('SELECT id, user_id, login_time, logout_time, pause_start_time, pause_end_time, pause_minutes, working_hours, overtime_hours FROM attendance WHERE id = ?').get(id) as any;
     if (!existing) throw new AppError(404, 'Record not found');
     const isAdmin = accessLevel === 'director' || accessLevel === 'hr';
 
@@ -642,6 +642,37 @@ export class AttendanceService {
       const requested = Object.keys(input ?? {}).filter((k) => input[k] !== undefined);
       const disallowed = requested.filter((k) => !allowedForSelf.includes(k));
       if (disallowed.length > 0) throw new AppError(403, `Only location fields can be updated by an employee (disallowed: ${disallowed.join(', ')})`);
+    }
+
+    // Auto-calculate hours/pause from the edited times when the caller did not supply the
+    // computed fields explicitly. Overtime uses the same 8-hour (480 min) workday threshold as check-out.
+    if (isAdmin && (input.loginTime !== undefined || input.logoutTime !== undefined || input.pauseStartTime !== undefined || input.pauseEndTime !== undefined)) {
+      const eff = (key: string, dbVal: any) => (input[key] !== undefined ? parseUTC(String(input[key])) : dbVal ? parseUTC(String(dbVal)) : null);
+      const login = eff('loginTime', existing.login_time);
+      const logout = eff('logoutTime', existing.logout_time);
+      const ps = eff('pauseStartTime', existing.pause_start_time);
+      const pe = eff('pauseEndTime', existing.pause_end_time);
+      const minsBetween = (a: Date | null, b: Date | null): number | null => (a && b && !isNaN(a.getTime()) && !isNaN(b.getTime()) ? Math.round((b.getTime() - a.getTime()) / 60000) : null);
+
+      let pauseMinutes: number | null = null;
+      const sessionPause = minsBetween(ps, pe);
+      if (sessionPause !== null) pauseMinutes = Math.max(0, sessionPause);
+      else if (input.pauseMinutes === undefined) pauseMinutes = Number(existing.pause_minutes ?? 0) || 0;
+
+      if (login && logout && input.workingHours === undefined) {
+        const raw = Math.max(0, Math.round((logout.getTime() - login.getTime()) / 60000));
+        const pause = pauseMinutes ?? 0;
+        const workMinutes = Math.max(0, raw - pause);
+        (input as any).workingHours = Math.round((workMinutes / 60) * 100) / 100;
+        if (input.overtimeHours === undefined) {
+          (input as any).overtimeHours = Math.max(0, Math.round((raw - pause - 480) / 60 * 100) / 100);
+        }
+        if (sessionPause !== null && input.pauseMinutes === undefined) {
+          (input as any).pauseMinutes = pauseMinutes;
+        }
+      } else if (sessionPause !== null && input.pauseMinutes === undefined) {
+        (input as any).pauseMinutes = pauseMinutes;
+      }
     }
 
     const sets: string[] = ["updated_at = NOW()"]; const params: any[] = [];

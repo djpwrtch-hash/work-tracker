@@ -37,6 +37,47 @@ function dateOnlyOf(v: any): string {
   return m ? m[0] : '';
 }
 
+/** Parse "HH:MM" to minutes since midnight, or null when invalid/empty. */
+function hmToMinutes(v: any): number | null {
+  const s = String(v ?? '').trim();
+  const m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = Number(m[1]), min = Number(m[2]);
+  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return h * 60 + min;
+}
+
+/**
+ * Auto-compute working/overtime/pause minutes from the edit form's time fields.
+ * Overtime uses the same 8-hour (480-minute) workday threshold as the server.
+ * Returns null for the hour values when login/logout are not both parseable,
+ * and null for pauseMinutes when both pause times are not both parseable.
+ */
+function computeHoursFromTimes(f: { loginTime?: string; logoutTime?: string; pauseStartTime?: string; pauseEndTime?: string; pauseMinutes?: string }) {
+  const login = hmToMinutes(f.loginTime);
+  const logout = hmToMinutes(f.logoutTime);
+  const ps = hmToMinutes(f.pauseStartTime);
+  const pe = hmToMinutes(f.pauseEndTime);
+
+  // pauseMinutes derived from the visible single session when both ends are set; otherwise null (caller keeps the field value)
+  let pauseMinutes: number | null = null;
+  if (ps !== null && pe !== null) {
+    pauseMinutes = Math.max(0, pe - ps);
+  }
+  const pauseForCalc = pauseMinutes ?? (Number(f.pauseMinutes) || 0);
+
+  if (login === null || logout === null) {
+    return { workingHours: null as number | null, overtimeHours: null as number | null, pauseMinutes };
+  }
+  const raw = Math.max(0, logout - login);
+  const workMinutes = Math.max(0, raw - pauseForCalc);
+  return {
+    workingHours: Math.round((workMinutes / 60) * 100) / 100,
+    overtimeHours: Math.max(0, Math.round((raw - pauseForCalc - 480) / 60 * 100) / 100),
+    pauseMinutes,
+  };
+}
+
 function utcToIstTime(v: any): string {
   const d = parseServerTime(v);
   if (!d) return '';
@@ -335,8 +376,38 @@ export default function AttendancePage() {
     pauseMinutes: '',
     notes: '',
   });
+  // Tracks which hour fields the admin typed manually. Time-field changes only auto-fill the
+  // untouched fields so admin's manual numbers are never clobbered by the recompute.
+  const manualHoursRef = useRef<{ workingHours: boolean; overtimeHours: boolean; pauseMinutes: boolean }>({ workingHours: false, overtimeHours: false, pauseMinutes: false });
+
+  const applyComputedHours = (f: typeof editForm, touch: 'login' | 'logout' | 'pause' | 'reset') => {
+    const out: Partial<typeof editForm> = {};
+    const computed = computeHoursFromTimes(f);
+    if (touch === 'pause' || touch === 'reset') {
+      if (!manualHoursRef.current.pauseMinutes && computed.pauseMinutes !== null) {
+        out.pauseMinutes = String(computed.pauseMinutes);
+      }
+    }
+    // Hours always recompute as-per the current inputs (respecting manual overrides + effective pause)
+    const pauseForHours = out.pauseMinutes ?? f.pauseMinutes;
+    const re = computeHoursFromTimes({ ...f, pauseMinutes: pauseForHours });
+    if (!manualHoursRef.current.workingHours && re.workingHours !== null) out.workingHours = String(re.workingHours);
+    if (!manualHoursRef.current.overtimeHours && re.overtimeHours !== null) out.overtimeHours = String(re.overtimeHours);
+    return out;
+  };
+
+  const updateEditForm = (patch: Partial<typeof editForm>, touch: 'login' | 'logout' | 'pause' | 'hours' | 'simple') => {
+    setEditForm((prev) => {
+      const next = { ...prev, ...patch };
+      if (touch === 'login' || touch === 'logout' || touch === 'pause') {
+        return { ...next, ...applyComputedHours(next, touch) };
+      }
+      return next;
+    });
+  };
 
   const startEdit = (r: any) => {
+    manualHoursRef.current = { workingHours: false, overtimeHours: false, pauseMinutes: false };
     setEditRecord(r);
     setEditForm({
       status: String(r.status ?? 'present'),
@@ -1091,6 +1162,12 @@ export default function AttendancePage() {
                   <LogIn className="h-4 w-4" />Check in to override
                 </span>
               )}
+              {isAdmin && (
+                <button onClick={() => startEdit(today)} aria-label="Edit today's attendance" title="Edit today's attendance"
+                  className="flex items-center gap-2 rounded-xl border border-violet-500/40 text-violet-300 hover:bg-violet-500/10 px-4 py-2 text-sm font-medium transition whitespace-nowrap">
+                  <Pencil className="h-4 w-4" />Edit
+                </button>
+              )}
             </div>
             {/* Timeline */}
             {todayEvents && todayEvents.length > 0 && (
@@ -1381,7 +1458,7 @@ export default function AttendancePage() {
       <Modal open={!!editRecord} onClose={() => setEditRecord(null)} title={editRecord ? `Edit Attendance — ${dateOnlyOf(editRecord.date)}` : 'Edit Attendance'}>
         {editRecord && (
           <div className="space-y-4">
-            <p className="text-xs text-slate-500">{editRecord.first_name} {editRecord.last_name} · {editRecord.employee_id}</p>
+            <p className="text-xs text-slate-500">{editRecord.first_name ? `${editRecord.first_name} ${editRecord.last_name} · ${editRecord.employee_id}` : 'Today’s attendance record'}</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm text-slate-300 mb-1">Status</label>
@@ -1390,34 +1467,35 @@ export default function AttendancePage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm text-slate-300 mb-1">Working Hours</label>
-                <input type="number" min="0" max="24" step="0.25" value={editForm.workingHours} onChange={(e) => setEditForm({ ...editForm, workingHours: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" placeholder="e.g. 8" />
+                <label className="block text-sm text-slate-300 mb-1">Working Hours <span className="text-slate-500 font-normal">(auto)</span></label>
+                <input type="number" min="0" max="24" step="0.25" value={editForm.workingHours} onChange={(e) => { manualHoursRef.current.workingHours = true; setEditForm({ ...editForm, workingHours: e.target.value }); }} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" placeholder="e.g. 8" />
               </div>
               <div>
                 <label className="block text-sm text-slate-300 mb-1">Login (IST)</label>
-                <input type="time" value={editForm.loginTime} onChange={(e) => setEditForm({ ...editForm, loginTime: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" />
+                <input type="time" value={editForm.loginTime} onChange={(e) => updateEditForm({ loginTime: e.target.value }, 'login')} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" />
               </div>
               <div>
                 <label className="block text-sm text-slate-300 mb-1">Logout (IST)</label>
-                <input type="time" value={editForm.logoutTime} onChange={(e) => setEditForm({ ...editForm, logoutTime: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" />
+                <input type="time" value={editForm.logoutTime} onChange={(e) => updateEditForm({ logoutTime: e.target.value }, 'logout')} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" />
               </div>
               <div>
                 <label className="block text-sm text-slate-300 mb-1">Pause Start (IST)</label>
-                <input type="time" value={editForm.pauseStartTime} onChange={(e) => setEditForm({ ...editForm, pauseStartTime: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" />
+                <input type="time" value={editForm.pauseStartTime} onChange={(e) => updateEditForm({ pauseStartTime: e.target.value }, 'pause')} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" />
               </div>
               <div>
                 <label className="block text-sm text-slate-300 mb-1">Pause End (IST)</label>
-                <input type="time" value={editForm.pauseEndTime} onChange={(e) => setEditForm({ ...editForm, pauseEndTime: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" />
+                <input type="time" value={editForm.pauseEndTime} onChange={(e) => updateEditForm({ pauseEndTime: e.target.value }, 'pause')} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" />
               </div>
               <div>
-                <label className="block text-sm text-slate-300 mb-1">Overtime Hours</label>
-                <input type="number" min="0" max="24" step="0.25" value={editForm.overtimeHours} onChange={(e) => setEditForm({ ...editForm, overtimeHours: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" placeholder="e.g. 1.5" />
+                <label className="block text-sm text-slate-300 mb-1">Overtime Hours <span className="text-slate-500 font-normal">(auto)</span></label>
+                <input type="number" min="0" max="24" step="0.25" value={editForm.overtimeHours} onChange={(e) => { manualHoursRef.current.overtimeHours = true; setEditForm({ ...editForm, overtimeHours: e.target.value }); }} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" placeholder="e.g. 1.5" />
               </div>
               <div>
-                <label className="block text-sm text-slate-300 mb-1">Pause Minutes</label>
-                <input type="number" min="0" max="480" step="1" value={editForm.pauseMinutes} onChange={(e) => setEditForm({ ...editForm, pauseMinutes: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" placeholder="e.g. 30" />
+                <label className="block text-sm text-slate-300 mb-1">Pause Minutes <span className="text-slate-500 font-normal">(auto)</span></label>
+                <input type="number" min="0" max="480" step="1" value={editForm.pauseMinutes} onChange={(e) => { manualHoursRef.current.pauseMinutes = true; setEditForm({ ...editForm, pauseMinutes: e.target.value }); }} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" placeholder="e.g. 30" />
               </div>
             </div>
+            <p className="text-[10px] text-slate-500 -mt-1">Times auto-calculate Working Hours, Overtime (8h workday) and Pause Minutes. Edit any field to override — it stays manual until reset on reopen.</p>
             <div>
               <label className="block text-sm text-slate-300 mb-1">Notes</label>
               <textarea value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} rows={2} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" placeholder="Optional notes" />
