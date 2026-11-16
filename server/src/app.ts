@@ -38,6 +38,7 @@ import holidaysRoutes from './modules/holidays/holidays.routes.js';
 import analyticsRoutes from './modules/analytics/analytics.routes.js';
 import systemRoutes from './modules/system/system.routes.js';
 import filesRoutes from './modules/files/files.routes.js';
+import profilePhotoRoutes from './modules/profile-photo/profile-photo.routes.js';
 import securityRoutes from './modules/security/security.routes.js';
 
 const swaggerCsp = helmet({
@@ -269,6 +270,7 @@ export function createApp() {
   app.use(`${api}/analytics`, analyticsRoutes);
   app.use(`${api}/system`, systemRoutes);
   app.use(`${api}/files`, filesRoutes);
+  app.use(`${api}/profile-photo`, profilePhotoRoutes);
   app.use(`${api}/security`, securityRoutes);
 
   // API docs are opt-in in production and always protected by HTTP Basic auth.

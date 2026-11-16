@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getInitials, displayRole } from '../lib/utils';
+import Avatar from '@/components/Avatar';
+import { displayRole } from '../lib/utils';
 import ForcePasswordChange from './ForcePasswordChange';
 import NotificationBell from './NotificationBell';
 import {
@@ -32,9 +33,7 @@ const Sidebar = ({ mobile = false, nav, pathname, handleMobileClose, user, logou
     </nav>
     <div className="border-t border-slate-800 p-4">
       <div className="flex items-center gap-3 mb-3">
-        <div className="h-9 w-9 rounded-xl bg-violet-500/15 border border-violet-500/20 flex items-center justify-center text-violet-400 text-sm font-bold">
-          {getInitials(user?.firstName, user?.lastName)}
-        </div>
+        <Avatar user={user} size="md" />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-white truncate">{user?.firstName} {user?.lastName}</p>
           <p className="text-xs text-slate-400">{user?.role ? displayRole(user.role) : ''}</p>
@@ -126,7 +125,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
           <div className="flex items-center gap-3 flex-shrink-0">
             <NotificationBell />
-            <div className="h-8 w-8 rounded-lg bg-violet-600 flex items-center justify-center font-bold text-white text-xs">{getInitials(user?.firstName, user?.lastName)}</div>
+            <Avatar user={user} size="sm" />
           </div>
         </header>
         <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 safe-bottom">

@@ -1,11 +1,12 @@
 import DashboardLayout from '@/components/DashboardLayout';
+import Avatar from '@/components/Avatar';
 import TwoFactorQR from '@/components/TwoFactorQR';
 import { useAuth } from '@/context/AuthContext';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, getApiError } from '@/lib/api';
-import { displayRole, getInitials } from '@/lib/utils';
-import { useState } from 'react';
-import { User, Lock, Loader2, CheckCircle, ShieldCheck, ShieldOff, MapPin, Globe } from 'lucide-react';
+import { displayRole } from '@/lib/utils';
+import { useRef, useState } from 'react';
+import { User, Lock, Loader2, CheckCircle, ShieldCheck, ShieldOff, MapPin, Globe, Camera, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function ProfilePage() {
@@ -15,6 +16,21 @@ export default function ProfilePage() {
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [passwordErrors, setPasswordErrors] = useState<Record<string, string>>({});
   const [security, setSecurity] = useState<{ step: 'idle' | 'setup' | 'disable'; setup?: { secret: string; uri: string; qrCodeUrl: string }; code: string; disablePassword: string }>({ step: 'idle', code: '', disablePassword: '' });
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const uploadPhoto = useMutation({
+    mutationFn: async (file: File) => {
+      const form = new FormData();
+      form.append('photo', file);
+      return (await api.post('/profile-photo', form, { headers: { 'Content-Type': 'multipart/form-data' } })).data;
+    },
+    onSuccess: () => { toast.success('Profile photo updated'); qc.invalidateQueries({ queryKey: ['authMe'] }); refreshProfile(); },
+    onError: (e: any) => toast.error(getApiError(e, 'Failed to upload photo')),
+  });
+  const removePhoto = useMutation({
+    mutationFn: async () => (await api.delete('/profile-photo')).data,
+    onSuccess: () => { toast.success('Profile photo removed'); qc.invalidateQueries({ queryKey: ['authMe'] }); refreshProfile(); },
+    onError: (e: any) => toast.error(getApiError(e, 'Failed to remove photo')),
+  });
 
   const validatePassword = () => {
     const errors: Record<string, string> = {};
@@ -105,8 +121,22 @@ export default function ProfilePage() {
           <>
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
             <div className="flex items-start gap-6">
-              <div className="h-20 w-20 rounded-2xl bg-violet-500/15 border border-violet-500/20 flex items-center justify-center text-violet-400 text-2xl font-bold flex-shrink-0">
-                {getInitials(user.firstName, user.lastName)}
+              <div className="flex flex-col items-center gap-2 flex-shrink-0">
+                <Avatar user={user} size="lg" />
+                <div className="flex gap-1.5">
+                  <button type="button" onClick={() => photoInputRef.current?.click()} disabled={uploadPhoto.isPending} aria-label="Upload photo" title="Upload photo"
+                    className="rounded-lg border border-violet-500/40 text-violet-300 hover:bg-violet-500/10 p-1.5 transition disabled:opacity-50">
+                    {uploadPhoto.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+                  </button>
+                  {user.profilePictureUrl && (
+                    <button type="button" onClick={() => removePhoto.mutate()} disabled={removePhoto.isPending} aria-label="Remove photo" title="Remove photo"
+                      className="rounded-lg border border-rose-500/40 text-rose-400 hover:bg-rose-500/10 p-1.5 transition disabled:opacity-50">
+                      {removePhoto.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                    </button>
+                  )}
+                </div>
+                <input ref={photoInputRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="hidden"
+                  onChange={(e) => { const file = e.target.files?.[0]; if (file) { uploadPhoto.mutate(file); e.target.value = ''; } }} />
               </div>
               <div className="flex-1 space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

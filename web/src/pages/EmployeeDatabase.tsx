@@ -11,7 +11,8 @@ import EmployeeEditModal from '@/components/EmployeeEditModal';
 import { useAuth } from '@/context/AuthContext';
 import { api } from '@/lib/api';
 import { listenOnSocket } from '@/lib/socket';
-import { statusColor, formatDate, getInitials, exportToCSV } from '@/lib/utils';
+import Avatar from '@/components/Avatar';
+import { statusColor, formatDate, exportToCSV } from '@/lib/utils';
 import { DOC_TYPES, downloadDocumentPdf, downloadDocumentDoc, DocumentDocType } from '@/lib/documentTemplates';
 import type { DocumentRequest, DocumentsResponse, User, Department } from '@/types/api';
 
@@ -242,9 +243,7 @@ export default function EmployeeDatabasePage() {
                   className={`w-full text-left rounded-xl border px-3 py-2.5 transition ${selectedId === u.id ? 'bg-violet-600/15 border-violet-500/40' : 'bg-slate-800/40 border-slate-800 hover:border-slate-700'}`}
                 >
                   <div className="flex items-center gap-3">
-                    <span className="h-9 w-9 rounded-full bg-violet-600/20 text-violet-300 flex items-center justify-center text-xs font-bold flex-shrink-0">
-                      {getInitials(u.firstName, u.lastName)}
-                    </span>
+                    <Avatar user={u} size="md" />
                     <div className="min-w-0">
                       <p className="text-sm text-white font-medium truncate">{u.firstName} {u.lastName}</p>
                       <p className="text-xs text-slate-500 truncate">{u.employeeId} · {u.designation ?? '-'}</p>
@@ -266,9 +265,7 @@ export default function EmployeeDatabasePage() {
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex items-center gap-4 min-w-0">
-                    <span className="h-14 w-14 rounded-2xl bg-violet-600/20 text-violet-300 flex items-center justify-center text-lg font-bold flex-shrink-0">
-                      {getInitials(selected.firstName, selected.lastName)}
-                    </span>
+                    <Avatar user={selected} size="lg" />
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <h2 className="text-lg font-bold text-white">{selected.firstName} {selected.lastName}</h2>

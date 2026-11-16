@@ -144,6 +144,13 @@ export class UsersService {
 
     await db.prepare('DELETE FROM users WHERE id = ?').run(id);
     invalidateUserCache(id);
+    // Best-effort cleanup of the profile photo (storage may be local or S3).
+    try {
+      const { ProfilePhotoService } = await import('../profile-photo/profile-photo.service.js');
+      await ProfilePhotoService.remove(id);
+    } catch (e) {
+      console.error('[Users] Failed to delete profile photo for deleted user:', e);
+    }
     return { message: 'User deleted' };
   }
 
