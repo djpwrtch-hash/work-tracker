@@ -133,7 +133,7 @@ export class PlansService {
 
     const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
     const count = (await db.prepare(`SELECT count(*) as c FROM work_plans wp ${where}`).get(...params) as any).c;
-    const plans = await db.prepare(`SELECT wp.*, u.first_name, u.last_name, u.employee_id, r.first_name AS reviewer_first_name, r.last_name AS reviewer_last_name FROM work_plans wp JOIN users u ON wp.user_id = u.id LEFT JOIN users r ON r.id = wp.reviewed_by_id ${where} ORDER BY FIELD(wp.priority, 'urgent', 'high', 'medium', 'low'), wp.date DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+    const plans = await db.prepare(`SELECT wp.*, u.first_name, u.last_name, u.employee_id, r.first_name AS reviewer_first_name, r.last_name AS reviewer_last_name FROM work_plans wp JOIN users u ON wp.user_id = u.id LEFT JOIN users r ON r.id = wp.reviewed_by_id ${where} ORDER BY wp.date DESC, wp.submitted_at DESC, wp.updated_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
     const grouped = await loadPlanItemsForIds(plans.map((p: any) => p.id));
     return { plans: plans.map((p: any) => mapPlan(p, grouped[p.id] ?? [])), total: count, page, limit };
   }
@@ -271,7 +271,7 @@ export class PlansService {
     if (startDate) { conds.push('wp.date >= ?'); params.push(startDate); }
     if (endDate) { conds.push('wp.date <= ?'); params.push(endDate); }
     const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
-    const rows = await db.prepare(`SELECT wp.*, u.first_name, u.last_name, u.employee_id, r.first_name AS reviewer_first_name, r.last_name AS reviewer_last_name FROM work_plans wp JOIN users u ON wp.user_id = u.id LEFT JOIN users r ON r.id = wp.reviewed_by_id ${where} ORDER BY wp.date DESC`).all(...params) as any[];
+    const rows = await db.prepare(`SELECT wp.*, u.first_name, u.last_name, u.employee_id, r.first_name AS reviewer_first_name, r.last_name AS reviewer_last_name FROM work_plans wp JOIN users u ON wp.user_id = u.id LEFT JOIN users r ON r.id = wp.reviewed_by_id ${where} ORDER BY wp.date DESC, wp.submitted_at DESC, wp.updated_at DESC`).all(...params) as any[];
     const grouped = await loadPlanItemsForIds(rows.map((r) => r.id));
     return rows.map((r) => mapPlan(r, grouped[r.id] ?? []));
   }
