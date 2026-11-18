@@ -128,15 +128,7 @@ export class AttendanceService {
   static async checkIn(userId: string, input: { status?: string; notes?: string; latitude?: number; longitude?: number; accuracy?: number; locationCapturedAt?: string }) {
     const today = getISTDate();
 
-    // Respect the user's "Grant location" permission — silently drop any location
-    // data that may have been sent anyway.
-    const priv = await db.prepare('SELECT location_enabled FROM users WHERE id = ?').get(userId) as any;
-    if (priv && Number(priv.location_enabled) === 0) {
-      (input as any).latitude = undefined;
-      (input as any).longitude = undefined;
-      (input as any).accuracy = undefined;
-      (input as any).locationCapturedAt = undefined;
-    }
+    // Location capture is mandatory — always accept whatever location was sent.
     // A pending correction request (created after closing a missed check-out) blocks check-in until HR/director approves.
     const pending = await db.prepare("SELECT id FROM attendance_correction_requests WHERE user_id = ? AND status = 'pending' ORDER BY requested_at DESC LIMIT 1").get(userId) as any;
     if (pending) throw new AppError(409, 'PENDING_APPROVAL');
@@ -259,14 +251,7 @@ export class AttendanceService {
     const realToday = getISTDate();
     let today = getISTDate();
 
-    // Respect the user's "Grant location" permission — ignore location if disabled.
-    const priv = await db.prepare('SELECT location_enabled FROM users WHERE id = ?').get(userId) as any;
-    if (priv && Number(priv.location_enabled) === 0 && input) {
-      (input as any).latitude = undefined;
-      (input as any).longitude = undefined;
-      (input as any).accuracy = undefined;
-      (input as any).locationCapturedAt = undefined;
-    }
+    // Location capture is mandatory — always accept whatever location was sent.
     // A stale missed check-out (previous day, login_time set, logout_time absent)
     // takes priority: closing it must not be blocked by a today row that already
     // exists (absent/leave/holiday, or a fresh check-in).

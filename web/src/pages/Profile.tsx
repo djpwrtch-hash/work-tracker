@@ -86,15 +86,6 @@ export default function ProfilePage() {
     onError: (e) => toast.error(getApiError(e, 'Failed to disable 2FA')),
   });
 
-  const updatePreferences = useMutation({
-    mutationFn: async (data: { locationEnabled?: boolean; ipEnabled?: boolean }) => (await api.patch('/auth/preferences', data)).data,
-    onSuccess: () => {
-      toast.success('Preference updated');
-      refreshProfile();
-    },
-    onError: (e) => toast.error(getApiError(e, 'Failed to update preference')),
-  });
-
   if (!user) return null;
 
   return (
@@ -184,40 +175,31 @@ export default function ProfilePage() {
           </div>
 
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-            <h2 className="text-lg font-bold text-white mb-1">Privacy & Permissions</h2>
-            <p className="text-xs text-slate-500 mb-4">Control what the system collects about you. Defaults are ON for everyone.</p>
+            <h2 className="text-lg font-bold text-white mb-1">Privacy &amp; Permissions</h2>
+            <p className="text-xs text-slate-500 mb-4">Location and IP logging are mandatory for all users and cannot be disabled.</p>
             <div className="space-y-3">
               {[
                 {
                   key: 'locationEnabled',
-                  label: 'Grant location access',
-                  desc: 'Allow check-in/check-out to capture your device location via GPS. GPS-only — never IP-based. Turning this off stops location collection entirely.',
-                  value: user.locationEnabled ?? true,
+                  label: 'GPS location capture',
+                  desc: 'Check-in/check-out captures your device location via GPS. Mandatory, always on.',
                   Icon: MapPin,
                 },
                 {
                   key: 'ipEnabled',
-                  label: 'Grant IP logging',
-                  desc: 'Allow storing your IP address in activity/audit logs for security and compliance. Turning this off stores a null IP instead.',
-                  value: user.ipEnabled ?? true,
+                  label: 'IP logging',
+                  desc: 'Your IP address is stored in activity/audit logs for security and compliance. Mandatory, always on.',
                   Icon: Globe,
                 },
-              ].map(({ key, label, desc, value, Icon }) => (
-                <div key={key} className="flex items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-800/40 px-4 py-3">
-                  <div className="flex items-start gap-3 min-w-0">
-                    <div className="rounded-lg bg-violet-500/15 border border-violet-500/20 p-1.5 flex-shrink-0 mt-0.5">
-                      <Icon className="h-4 w-4 text-violet-400" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-white">{label}</p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">{desc}</p>
-                    </div>
+              ].map(({ key, label, desc, Icon }) => (
+                <div key={key} className="flex items-center gap-4 rounded-xl border border-slate-800 bg-slate-800/40 px-4 py-3">
+                  <div className="rounded-lg bg-violet-500/15 border border-violet-500/20 p-1.5 flex-shrink-0">
+                    <Icon className="h-4 w-4 text-violet-400" />
                   </div>
-                  <button type="button" role="switch" aria-checked={value} aria-label={label}
-                    onClick={() => updatePreferences.mutate({ [key]: !value })}
-                    className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 transition-colors focus:outline-none ${value ? 'bg-violet-600 border-violet-600' : 'bg-slate-700 border-slate-700'}`}>
-                    <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${value ? 'translate-x-5' : 'translate-x-0'}`} />
-                  </button>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-white">{label}</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">{desc}</p>
+                  </div>
                 </div>
               ))}
             </div>

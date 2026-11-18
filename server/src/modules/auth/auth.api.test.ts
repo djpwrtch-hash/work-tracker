@@ -77,27 +77,14 @@ describe('privacy toggles (location & IP)', () => {
     expect(res.body.ipEnabled).toBe(true);
   });
 
-  it('can toggle location and IP off and back on', async () => {
+  it('location and IP are mandatory — preferences endpoint is gone', async () => {
     const user = await createUser({ password: 'Password123!' });
     const { token } = await loginAs(user.email, 'Password123!');
-    const off = await request(app)
+    const res = await request(app)
       .patch('/api/v1/auth/preferences')
       .set(authHeader(token))
       .send({ locationEnabled: false, ipEnabled: false });
-    expect(off.status).toBe(200);
-    expect(off.body.locationEnabled).toBe(false);
-    expect(off.body.ipEnabled).toBe(false);
-
-    const me = await request(app).get('/api/v1/auth/me').set(authHeader(token));
-    expect(me.body.locationEnabled).toBe(false);
-    expect(me.body.ipEnabled).toBe(false);
-
-    const on = await request(app)
-      .patch('/api/v1/auth/preferences')
-      .set(authHeader(token))
-      .send({ locationEnabled: true, ipEnabled: true });
-    expect(on.body.locationEnabled).toBe(true);
-    expect(on.body.ipEnabled).toBe(true);
+    expect(res.status).toBe(404);
   });
 });
 

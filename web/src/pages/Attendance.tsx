@@ -759,13 +759,12 @@ export default function AttendancePage() {
     onSettled: () => { qc.invalidateQueries({ predicate: (q) => ['todayAtt', 'attendance', 'monthlySummary', 'todayAll', 'todayEvents', 'correctionRequest', 'correctionRequests'].includes(q.queryKey[0] as string) }); },
   });
 
-  const locationEnabled = user?.locationEnabled ?? true;
-
+  // Location capture is mandatory (no toggle) — always attempts GPS.
   const handleCheckOut = async () => {
     setLocationError(null);
     // Keep the previous (e.g. check-in) coordinate visible while the background capture runs;
     // attachLocation updates it on success and leaves it untouched on failure.
-    const capturePromise = locationEnabled ? captureLocation({ windowMs: 20000, targetAccuracy: 5 }) : Promise.resolve({ location: null, error: { code: 'PERMISSION_DENIED', message: 'Location tracking is off in your profile.' } });
+    const capturePromise = captureLocation({ windowMs: 20000, targetAccuracy: 5 });
     try {
       const record = await checkOut.mutateAsync(null);
       toast.success('Checked out');
@@ -779,7 +778,7 @@ export default function AttendancePage() {
   const handleCheckIn = async () => {
     setLocationError(null);
     setCapturedLocation(null);
-    const capturePromise = locationEnabled ? captureLocation({ windowMs: 20000, targetAccuracy: 5 }) : Promise.resolve({ location: null, error: { code: 'PERMISSION_DENIED', message: 'Location tracking is off in your profile.' } });
+    const capturePromise = captureLocation({ windowMs: 20000, targetAccuracy: 5 });
     try {
       const record = await checkIn.mutateAsync(null);
       toast.success('Checked in');
@@ -814,7 +813,7 @@ export default function AttendancePage() {
           qc.setQueryData(['todayAtt'], (old: any) => (old ? { ...old, ...updated } : old));
         }
         void qc.invalidateQueries({ queryKey: ['todayEvents'] });
-      } else if (result.error && locationEnabled) {
+      } else if (result.error) {
         setLocationError(`${getLocationErrorMessage(result.error)} Location not saved.`);
       }
     } catch (e: any) {
@@ -1104,7 +1103,7 @@ export default function AttendancePage() {
                 <p className="text-xs text-slate-400">Location</p>
                 <div className="flex items-center gap-2 mt-1">
                   <p className="text-sm text-white"><LocationCell latitude={capturedLocation?.latitude ?? today.latitude} longitude={capturedLocation?.longitude ?? today.longitude} /></p>
-                  {(capturedLocation ?? today)?.latitude == null && locationEnabled && (
+                  {(capturedLocation ?? today)?.latitude == null && (
                     <button onClick={() => handleRetryLocation()} disabled={gettingLocation}
                       className="flex items-center gap-1 rounded-lg border border-violet-500/40 text-violet-300 hover:bg-violet-500/10 px-2 py-1 text-[10px] font-medium transition disabled:opacity-50 whitespace-nowrap">
                       {gettingLocation ? <Loader2 className="h-3 w-3 animate-spin" /> : <MapPin className="h-3 w-3" />}Retry location

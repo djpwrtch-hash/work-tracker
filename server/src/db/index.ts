@@ -733,6 +733,13 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       await db.exec("ALTER TABLE leaves MODIFY extra DECIMAL(4,1) NOT NULL DEFAULT 0");
     },
   },
+  {
+    version: 35,
+    name: 'privacy-toggles-mandatory',
+    up: async () => {
+      await db.exec("UPDATE users SET location_enabled = 1, ip_enabled = 1");
+    },
+  },
 ];
 
 await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
