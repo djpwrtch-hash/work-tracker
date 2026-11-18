@@ -324,7 +324,7 @@ export class AuthService {
   }
 
   static async getMe(userId: string) {
-    const user = await db.prepare('SELECT id, employee_id, first_name, last_name, email, role, department_id, designation, joining_date, status, phone_number, profile_picture_url, two_factor_enabled, must_change_password FROM users WHERE id = ?').get(userId) as any;
+    const user = await db.prepare('SELECT id, employee_id, first_name, last_name, email, role, department_id, designation, joining_date, status, phone_number, profile_picture_url, two_factor_enabled, must_change_password, location_enabled, ip_enabled FROM users WHERE id = ?').get(userId) as any;
     if (!user) throw new AppError(404, 'User not found');
     return {
       id: user.id, employeeId: user.employee_id, firstName: user.first_name, lastName: user.last_name,
@@ -332,7 +332,7 @@ export class AuthService {
       departmentId: user.department_id, designation: user.designation,
       joiningDate: user.joining_date, status: user.status, phoneNumber: user.phone_number, profilePictureUrl: user.profile_picture_url,
       twoFactorEnabled: !!user.two_factor_enabled, mustChangePassword: !!user.must_change_password,
-      locationEnabled: true, ipEnabled: true,
+      locationEnabled: !!user.location_enabled, ipEnabled: !!user.ip_enabled,
     };
   }
 

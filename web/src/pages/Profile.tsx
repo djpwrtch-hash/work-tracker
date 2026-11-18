@@ -176,19 +176,19 @@ export default function ProfilePage() {
 
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
             <h2 className="text-lg font-bold text-white mb-1">Privacy &amp; Permissions</h2>
-            <p className="text-xs text-slate-500 mb-4">Location and IP logging are mandatory for all users and cannot be disabled.</p>
+            <p className="text-xs text-slate-500 mb-4">Location and IP logging are managed by your director. Contact them to enable or disable either for your account.</p>
             <div className="space-y-3">
               {[
                 {
                   key: 'locationEnabled',
                   label: 'GPS location capture',
-                  desc: 'Check-in/check-out captures your device location via GPS. Mandatory, always on.',
+                  desc: 'Your device location via GPS is captured at check-in/check-out. Managed by your director.',
                   Icon: MapPin,
                 },
                 {
                   key: 'ipEnabled',
                   label: 'IP logging',
-                  desc: 'Your IP address is stored in activity/audit logs for security and compliance. Mandatory, always on.',
+                  desc: 'Your IP address is stored in activity/audit logs. Managed by your director.',
                   Icon: Globe,
                 },
               ].map(({ key, label, desc, Icon }) => (

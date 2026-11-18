@@ -108,12 +108,14 @@ export class UsersService {
 
   static async update(id: string, input: UpdateUserInput, requesterAccessLevel?: string) {
     if (!await db.prepare('SELECT id FROM users WHERE id = ?').get(id)) throw new AppError(404, 'User not found');
-    const allowedFields = ['firstName', 'lastName', 'phoneNumber', 'departmentId', 'designation', 'joiningDate', 'status', 'role', 'dob', 'gender', 'fatherName', 'nationality', 'qualification', 'addressStreet', 'addressCity', 'addressState', 'addressPincode'];
-    // Privilege guard: only directors may change role or status (HR would otherwise self-promote)
+    const allowedFields = ['firstName', 'lastName', 'phoneNumber', 'departmentId', 'designation', 'joiningDate', 'status', 'role', 'dob', 'gender', 'fatherName', 'nationality', 'qualification', 'addressStreet', 'addressCity', 'addressState', 'addressPincode', 'locationEnabled', 'ipEnabled'];
+    // Privilege guard: only directors may change role, status, or privacy toggles (location/IP). HR would otherwise self-promote or bypass privacy.
     const sanitized: Record<string, unknown> = { ...(input as Record<string, unknown>) };
     if (requesterAccessLevel !== 'director') {
       delete sanitized.role;
       delete sanitized.status;
+      delete sanitized.locationEnabled;
+      delete sanitized.ipEnabled;
     }
     if (sanitized.role !== undefined && !await roleExists(String(sanitized.role))) {
       throw new AppError(400, 'Unknown role');
@@ -124,7 +126,7 @@ export class UsersService {
       if (v === undefined || !allowedFields.includes(k)) continue;
       const col = k.replace(/([A-Z])/g, '_$1').toLowerCase();
       sets.push(`${col} = ?`);
-      params.push((k === 'joiningDate' || k === 'dob') ? toSQLDate(v) : v);
+      params.push((k === 'locationEnabled' || k === 'ipEnabled') ? (v ? 1 : 0) : (k === 'joiningDate' || k === 'dob') ? toSQLDate(v) : v);
     }
     params.push(id);
     await db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...params);

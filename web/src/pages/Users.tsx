@@ -20,12 +20,13 @@ export default function UsersPage() {
   const { user, loading } = useAuth();
   const qc = useQueryClient();
   const { confirm } = useConfirm();
+  const isDirector = user?.accessLevel === 'director';
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
-  const [form, setForm] = useState({ email: '', password: '', firstName: '', lastName: '', role: 'employee', departmentId: '', designation: '', phoneNumber: '', dob: '', gender: 'male' as 'male'|'female'|'other', fatherName: '', nationality: '', qualification: '', addressStreet: '', addressCity: '', addressState: '', addressPincode: '', joiningDate: '' });
+  const [form, setForm] = useState({ email: '', password: '', firstName: '', lastName: '', role: 'employee', departmentId: '', designation: '', phoneNumber: '', dob: '', gender: 'male' as 'male'|'female'|'other', fatherName: '', nationality: '', qualification: '', addressStreet: '', addressCity: '', addressState: '', addressPincode: '', joiningDate: '', locationEnabled: true, ipEnabled: true });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [showExport, setShowExport] = useState(false);
   const [error, setError] = useState('');
@@ -136,13 +137,15 @@ export default function UsersPage() {
   const createUser = useMutation({
     mutationFn: async (d: typeof form) => {
       const payload: any = { firstName: d.firstName, lastName: d.lastName, role: d.role, dob: d.dob, gender: d.gender, fatherName: d.fatherName, nationality: d.nationality, qualification: d.qualification, addressStreet: d.addressStreet, addressCity: d.addressCity, addressState: d.addressState, addressPincode: d.addressPincode, joiningDate: d.joiningDate ? new Date(d.joiningDate).toISOString() : undefined };
+      // Director-only privacy toggles
+      if (isDirector) { payload.locationEnabled = d.locationEnabled; payload.ipEnabled = d.ipEnabled; }
       if (!editId) { payload.email = d.email; payload.password = d.password; }
       if (d.departmentId) payload.departmentId = d.departmentId;
       if (d.designation) payload.designation = d.designation;
       payload.phoneNumber = d.phoneNumber;
       return editId ? (await api.patch(`/users/${editId}`, payload)).data : (await api.post('/users', payload)).data;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); setShowCreate(false); setEditId(null); setForm({ email: '', password: '', firstName: '', lastName: '', role: 'employee', departmentId: '', designation: '', phoneNumber: '', dob: '', gender: 'male' as 'male'|'female'|'other', fatherName: '', nationality: '', qualification: '', addressStreet: '', addressCity: '', addressState: '', addressPincode: '', joiningDate: '' }); setFormErrors({}); toast.success(editId ? 'User updated successfully' : 'User created successfully'); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); setShowCreate(false); setEditId(null); setForm({ email: '', password: '', firstName: '', lastName: '', role: 'employee', departmentId: '', designation: '', phoneNumber: '', dob: '', gender: 'male' as 'male'|'female'|'other', fatherName: '', nationality: '', qualification: '', addressStreet: '', addressCity: '', addressState: '', addressPincode: '', joiningDate: '', locationEnabled: true, ipEnabled: true }); setFormErrors({}); toast.success(editId ? 'User updated successfully' : 'User created successfully'); },
     onError: (e) => { setError(getApiError(e, 'Failed')); toast.error(getApiError(e, 'Failed to save user')); },
   });
 
@@ -212,7 +215,7 @@ export default function UsersPage() {
             {data?.users && data.users.length > 0 && (
               <button onClick={() => setShowExport(true)} className="flex items-center gap-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2.5 text-sm font-medium transition border border-slate-700"><Download className="h-4 w-4" />Export</button>
             )}
-            <button onClick={() => { setShowCreate(true); setEditId(null); setForm({ email: '', password: '', firstName: '', lastName: '', role: 'employee', departmentId: '', designation: '', phoneNumber: '', dob: '', gender: 'male' as 'male'|'female'|'other', fatherName: '', nationality: '', qualification: '', addressStreet: '', addressCity: '', addressState: '', addressPincode: '', joiningDate: '' }); setFormErrors({}); }} className="flex items-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white px-4 py-2.5 text-sm font-semibold transition"><Plus className="h-4 w-4" />New User</button>
+            <button onClick={() => { setShowCreate(true); setEditId(null); setForm({ email: '', password: '', firstName: '', lastName: '', role: 'employee', departmentId: '', designation: '', phoneNumber: '', dob: '', gender: 'male' as 'male'|'female'|'other', fatherName: '', nationality: '', qualification: '', addressStreet: '', addressCity: '', addressState: '', addressPincode: '', joiningDate: '', locationEnabled: true, ipEnabled: true }); setFormErrors({}); }} className="flex items-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white px-4 py-2.5 text-sm font-semibold transition"><Plus className="h-4 w-4" />New User</button>
           </div>
         </div>
 
@@ -235,7 +238,7 @@ export default function UsersPage() {
           actions={(u: any) => (
             <>
               <button onClick={() => openReset(u)} title="Reset password" className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-amber-400 transition"><KeyRound className="h-4 w-4" /></button>
-              <button onClick={() => { setEditId(u.id); setForm({ email: u.email, password: '', firstName: u.firstName, lastName: u.lastName, role: u.role, departmentId: u.departmentId || '', designation: u.designation || '', phoneNumber: u.phoneNumber || '', dob: u.dob ? u.dob.split('T')[0] : '', gender: u.gender || 'male', fatherName: u.fatherName || '', nationality: u.nationality || '', qualification: u.qualification || '', addressStreet: u.addressStreet || '', addressCity: u.addressCity || '', addressState: u.addressState || '', addressPincode: u.addressPincode || '', joiningDate: u.joiningDate ? u.joiningDate.split('T')[0] : '' }); setShowCreate(true); setFormErrors({}); }} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition"><Pencil className="h-4 w-4" /></button>
+              <button onClick={() => { setEditId(u.id); setForm({ email: u.email, password: '', firstName: u.firstName, lastName: u.lastName, role: u.role, departmentId: u.departmentId || '', designation: u.designation || '', phoneNumber: u.phoneNumber || '', dob: u.dob ? u.dob.split('T')[0] : '', gender: u.gender || 'male', fatherName: u.fatherName || '', nationality: u.nationality || '', qualification: u.qualification || '', addressStreet: u.addressStreet || '', addressCity: u.addressCity || '', addressState: u.addressState || '', addressPincode: u.addressPincode || '', joiningDate: u.joiningDate ? u.joiningDate.split('T')[0] : '', locationEnabled: u.locationEnabled ?? true, ipEnabled: u.ipEnabled ?? true }); setShowCreate(true); setFormErrors({}); }} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition"><Pencil className="h-4 w-4" /></button>
               <button onClick={async () => { if (await confirm({ title: 'Delete User', message: 'This action cannot be undone. Are you sure you want to delete this user?', variant: 'danger', confirmText: 'Delete' })) deleteUser.mutate(u.id); }} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-rose-400 transition"><Trash2 className="h-4 w-4" /></button>
             </>
           )}
@@ -298,6 +301,28 @@ export default function UsersPage() {
                 {formErrors.joiningDate && <p className="text-xs text-rose-400 mt-1">{formErrors.joiningDate}</p>}
               </div>
             </div>
+            {isDirector && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+                <p className="text-xs font-semibold text-amber-400 uppercase tracking-wide mb-3">Privacy (director-only)</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    { key: 'locationEnabled', label: 'Capture location', desc: 'This user’s GPS location at check-in/out' },
+                    { key: 'ipEnabled', label: 'Log IP address', desc: 'Store this user’s IP in activity logs' },
+                  ].map(({ key, label, desc }) => (
+                    <div key={key} className="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2.5">
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-white">{label}</p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">{desc}</p>
+                      </div>
+                      <button type="button" role="switch" aria-checked={(form as any)[key]} onClick={() => setForm({ ...form, [key]: !(form as any)[key] } as any)}
+                        className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 transition-colors ${(form as any)[key] ? 'bg-violet-600 border-violet-600' : 'bg-slate-700 border-slate-700'}`}>
+                        <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${(form as any)[key] ? 'translate-x-5' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm text-slate-300 mb-1">Gender *</label>
