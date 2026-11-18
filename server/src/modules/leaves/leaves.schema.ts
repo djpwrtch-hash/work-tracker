@@ -5,11 +5,20 @@ export const createLeaveSchema = z.object({
   startDate: z.string().trim().min(1, 'Start date is required').refine((val) => !isNaN(Date.parse(val)), 'Invalid start date format'),
   endDate: z.string().trim().min(1, 'End date is required').refine((val) => !isNaN(Date.parse(val)), 'Invalid end date format'),
   reason: z.string().trim().min(1, 'Reason is required').max(2000, 'Reason too long'),
+  duration: z.enum(['full_day', 'half_day']).default('full_day'),
+  halfDayPeriod: z.enum(['morning', 'afternoon']).optional(),
 }).refine((data) => {
   const start = new Date(data.startDate);
   const end = new Date(data.endDate);
   return end >= start;
 }, { message: 'End date must be after or equal to start date', path: ['endDate'] })
+.refine((data) => {
+  if (data.duration !== 'half_day') return true;
+  const start = new Date(data.startDate);
+  const end = new Date(data.endDate);
+  return start.toDateString() === end.toDateString();
+}, { message: 'Half-day leave can only span a single day', path: ['endDate'] })
+.refine((data) => data.duration !== 'half_day' || !!data.halfDayPeriod, { message: 'Select morning or afternoon for half-day leave', path: ['halfDayPeriod'] })
 .refine((data) => {
   const start = new Date(data.startDate);
   const end = new Date(data.endDate);

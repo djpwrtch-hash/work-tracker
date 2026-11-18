@@ -722,6 +722,17 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       await addColumnIfMissing('document_requests', 'rejected_by_id', 'rejected_by_id VARCHAR(36) NULL');
     },
   },
+  {
+    version: 34,
+    name: 'leave-half-day',
+    up: async () => {
+      await addColumnIfMissing('leaves', 'duration', "duration VARCHAR(10) NOT NULL DEFAULT 'full_day'");
+      await addColumnIfMissing('leaves', 'half_day_period', "half_day_period VARCHAR(10) NULL");
+      await db.exec("UPDATE leaves SET duration = 'full_day', half_day_period = NULL");
+      // Allow fractional extra-leave count (0.5-day increments)
+      await db.exec("ALTER TABLE leaves MODIFY extra DECIMAL(4,1) NOT NULL DEFAULT 0");
+    },
+  },
 ];
 
 await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (

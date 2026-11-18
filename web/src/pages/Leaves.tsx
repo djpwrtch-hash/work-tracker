@@ -64,7 +64,7 @@ export default function LeavesPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showExport, setShowExport] = useState(false);
-  const [form, setForm] = useState({ type: 'casual', startDate: '', endDate: '', reason: '' });
+  const [form, setForm] = useState({ type: 'casual', startDate: '', endDate: '', reason: '', duration: 'full_day' as 'full_day' | 'half_day', halfDayPeriod: 'morning' as 'morning' | 'afternoon' });
   const [error, setError] = useState('');
   const [rejectModal, setRejectModal] = useState<{ id: string; type: string } | null>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -131,6 +131,7 @@ export default function LeavesPage() {
             <span className={totalRemaining < 0 ? 'text-rose-400 font-semibold' : ''}>Total {totalRemaining}</span>
           </span> },
       { header: 'Reason', key: 'reason', render: (l: any) => <span className="text-slate-300 text-xs">{l.reason || '-'}</span> },
+      { header: 'Duration', key: 'duration', render: (l: any) => l.duration === 'half_day' ? <span className="inline-flex items-center rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-300">Half day{l.halfDayPeriod ? ` (${l.halfDayPeriod})` : ''}</span> : <span className="text-slate-300 text-xs">Full day</span> },
       { header: 'Review', key: 'review', render: (l: any) => l.status === 'rejected' && (l.reviewerFirstName || l.reviewerLastName)
         ? <span className="text-rose-400 text-xs">Rejected by <span className="font-semibold">{l.reviewerFirstName} {l.reviewerLastName}</span>{l.reviewComment ? <><br />{l.reviewComment}</> : null}</span>
         : l.status === 'approved' && (l.reviewerFirstName || l.reviewerLastName)
@@ -148,7 +149,9 @@ export default function LeavesPage() {
     return set;
   }, [holidays, user?.id]);
 
-  const daysRequested = form.startDate && form.endDate ? countWorkingDays(form.startDate, form.endDate, excludedHolidayDates) : 0;
+  const daysRequested = form.duration === 'half_day'
+    ? (form.startDate ? 0.5 : 0)
+    : (form.startDate && form.endDate ? countWorkingDays(form.startDate, form.endDate, excludedHolidayDates) : 0);
 
   const deductionPrediction = useMemo(() => {
     if (!balance?.balances || daysRequested === 0) return null;
@@ -242,10 +245,12 @@ export default function LeavesPage() {
       type: d.type, 
       startDate: d.startDate ? new Date(d.startDate).toISOString() : undefined, 
       endDate: d.endDate ? new Date(d.endDate).toISOString() : undefined, 
-      reason: d.reason || undefined 
+      reason: d.reason || undefined,
+      duration: d.duration,
+      halfDayPeriod: d.duration === 'half_day' ? d.halfDayPeriod : undefined,
     })).data,
     onMutate: () => setError(''),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['leaves'] }); qc.invalidateQueries({ queryKey: ['leaveBal'] }); setShowCreate(false); setForm({ type: 'casual', startDate: '', endDate: '', reason: '' }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['leaves'] }); qc.invalidateQueries({ queryKey: ['leaveBal'] }); setShowCreate(false); setForm({ type: 'casual', startDate: '', endDate: '', reason: '', duration: 'full_day', halfDayPeriod: 'morning' }); },
     onError: (e) => setError(getApiError(e, 'Leave request failed')),
   });
 
@@ -383,9 +388,29 @@ export default function LeavesPage() {
           {error && <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm rounded-xl px-4 py-3 mb-4">{error}</div>}
           <div className="space-y-4">
             <div><label className="block text-sm text-slate-300 mb-1">Type</label><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white"><option value="casual">Casual</option><option value="sick">Sick</option><option value="proposal">Proposal</option></select></div>
+            <div>
+              <label className="block text-sm text-slate-300 mb-1">Duration</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => setForm({ ...form, duration: 'full_day' })} className={`rounded-xl px-4 py-2.5 text-sm font-medium border transition ${form.duration === 'full_day' ? 'border-violet-500 bg-violet-600 text-white' : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'}`}>Full day</button>
+                <button type="button" onClick={() => setForm({ ...form, duration: 'half_day', endDate: form.startDate })} className={`rounded-xl px-4 py-2.5 text-sm font-medium border transition ${form.duration === 'half_day' ? 'border-violet-500 bg-violet-600 text-white' : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'}`}>Half day</button>
+              </div>
+            </div>
+            {form.duration === 'half_day' && (
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Half-day period</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => setForm({ ...form, halfDayPeriod: 'morning' })} className={`rounded-xl px-4 py-2.5 text-sm font-medium border transition ${form.halfDayPeriod === 'morning' ? 'border-violet-500 bg-violet-600 text-white' : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'}`}>Morning</button>
+                  <button type="button" onClick={() => setForm({ ...form, halfDayPeriod: 'afternoon' })} className={`rounded-xl px-4 py-2.5 text-sm font-medium border transition ${form.halfDayPeriod === 'afternoon' ? 'border-violet-500 bg-violet-600 text-white' : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'}`}>Afternoon</button>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div><label className="block text-sm text-slate-300 mb-1">Start *</label><input type="date" min={todayIST} value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" /></div>
-              <div><label className="block text-sm text-slate-300 mb-1">End *</label><input type="date" min={form.startDate || todayIST} value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" /></div>
+              <div><label className="block text-sm text-slate-300 mb-1">Date *</label><input type="date" min={todayIST} value={form.startDate} onChange={(e) => setForm(form.duration === 'half_day' ? { ...form, startDate: e.target.value, endDate: e.target.value } : { ...form, startDate: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" /></div>
+              {form.duration === 'full_day' ? (
+                <div><label className="block text-sm text-slate-300 mb-1">End *</label><input type="date" min={form.startDate || todayIST} value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" /></div>
+              ) : (
+                <div className="flex items-end"><div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-300 w-full">Half day — deducted as <strong>0.5 day</strong>.</div></div>
+              )}
             </div>
             {form.startDate && form.startDate < todayIST && (
               <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm rounded-xl px-4 py-3">Start date cannot be in the past.</div>

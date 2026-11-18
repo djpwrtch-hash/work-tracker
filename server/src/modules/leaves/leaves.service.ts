@@ -46,6 +46,7 @@ function mapLeave(l: any) {
     reason: l.reason, status: l.status, reviewComment: l.review_comment,
     reviewedById: l.reviewed_by_id, reviewedAt: l.reviewed_at,
     reviewerFirstName: l.reviewer_first_name ?? null, reviewerLastName: l.reviewer_last_name ?? null,
+    duration: l.duration ?? 'full_day', halfDayPeriod: l.half_day_period ?? null,
     createdAt: l.created_at, updatedAt: l.updated_at,
     firstName: l.first_name, lastName: l.last_name, employeeId: l.employee_id,
     deductedFrom: l.deducted_from, extra: l.extra ?? 0, leaveYear: l.leave_year,
@@ -158,7 +159,7 @@ interface LeaveUsage {
 
 async function computeUsage(userId: string, year: number): Promise<LeaveUsage> {
   const requests = await db.prepare(
-    "SELECT id, start_date, end_date, status, leave_year FROM leaves WHERE user_id = ? AND status = 'approved'"
+    "SELECT id, start_date, end_date, status, leave_year, duration FROM leaves WHERE user_id = ? AND status = 'approved'"
   ).all(userId) as any[];
 
   // Collect all (clampedStart, clampedEnd) ranges so we can batch the holiday query.
@@ -184,6 +185,10 @@ async function computeUsage(userId: string, year: number): Promise<LeaveUsage> {
   const byYear = new Map<number, number>();
   for (const r of requests) {
     const ry = r.leave_year ?? yearOf(r.start_date);
+    if (r.duration === 'half_day') {
+      byYear.set(ry, (byYear.get(ry) ?? 0) + 0.5);
+      continue;
+    }
     byYear.set(ry, (byYear.get(ry) ?? 0) + await daysWithinYear(userId, r.start_date, r.end_date, ry, holidayCache));
   }
 
@@ -220,6 +225,8 @@ export class LeavesService {
     const isAutoApprove = role === 'director';
     const status = isAutoApprove ? 'approved' : 'pending';
     const leaveYear = yearOf(startDate);
+    const duration = input.duration ?? 'full_day';
+    const halfDayPeriod = duration === 'half_day' ? input.halfDayPeriod ?? 'morning' : null;
 
     const leaveRecord = await (await db.transaction(async () => {
       // Overlap check inside transaction for atomicity
@@ -227,18 +234,25 @@ export class LeavesService {
       if (overlap) throw new AppError(409, 'Leave request overlaps with existing leave');
       const id = uuid();
       let extra = 0;
+      // Half-day leave consumes 0.5 day; otherwise count working days
+      const requestedDays = duration === 'half_day' ? 0.5 : (await workingDates(userId, startDate, endDate)).length;
       let workingDays: string[] = [];
       if (isAutoApprove) {
         workingDays = await workingDates(userId, startDate, endDate);
-        extra = await computeRequestExtra(userId, leaveYear, workingDays.length);
+        if (duration === 'half_day') {
+          extra = await computeRequestExtra(userId, leaveYear, 0.5);
+        } else {
+          extra = await computeRequestExtra(userId, leaveYear, workingDays.length);
+        }
       }
 
-      await db.prepare('INSERT INTO leaves (id, user_id, type, start_date, end_date, reason, status, deducted_from, leave_year, extra) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(id, userId, input.type, startDate, endDate, input.reason ?? null, status, deductedFrom, leaveYear, extra);
+      await db.prepare('INSERT INTO leaves (id, user_id, type, start_date, end_date, reason, status, deducted_from, leave_year, extra, duration, half_day_period) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(id, userId, input.type, startDate, endDate, input.reason ?? null, status, deductedFrom, leaveYear, extra, duration, halfDayPeriod);
 
       if (isAutoApprove) {
         const dates = workingDays.length > 0 ? workingDays : await workingDates(userId, startDate, endDate);
-        const notes = `${input.type} leave - ${input.reason ?? ''}`;
+        const durationNote = duration === 'half_day' ? ` half-day leave (${halfDayPeriod})` : ' leave';
+        const notes = `${input.type}${durationNote} - ${input.reason ?? ''}`;
         const CHUNK = 500;
         for (let i = 0; i < dates.length; i += CHUNK) {
           const chunk = dates.slice(i, i + CHUNK);
@@ -254,10 +268,11 @@ export class LeavesService {
 
         const hrUsers = await db.prepare("SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level = 'hr'").all() as any[];
         const insertNotif = db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)');
+        const halfNote = duration === 'half_day' ? ` half-day (${halfDayPeriod})` : '';
         for (const a of hrUsers) {
-          await insertNotif.run(uuid(), a.id, userId, 'Leave Auto-Approved', `${input.type} leave taken by director`, 'info', `/leaves/${id}`);
+          await insertNotif.run(uuid(), a.id, userId, 'Leave Auto-Approved', `${input.type}${halfNote} leave taken by director`, 'info', `/leaves/${id}`);
         }
-        await insertNotif.run(uuid(), userId, userId, 'Leave Auto-Approved', `Your ${input.type} leave has been auto-approved`, 'success', `/leaves/${id}`);
+        await insertNotif.run(uuid(), userId, userId, 'Leave Auto-Approved', `Your ${input.type}${halfNote} leave has been auto-approved`, 'success', `/leaves/${id}`);
       } else {
         const admins = await db.prepare("SELECT u.id, u.email, u.first_name, u.last_name FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr')").all() as any[];
         const insertNotif = db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)');
@@ -397,7 +412,7 @@ export class LeavesService {
     if (status === 'rejected' && (!comments || comments.trim().length === 0)) {
       throw new AppError(400, 'Rejection reason is required');
     }
-    const leave = await db.prepare('SELECT id, user_id, type, start_date, end_date, reason, status FROM leaves WHERE id = ?').get(id) as any;
+    const leave = await db.prepare('SELECT id, user_id, type, start_date, end_date, reason, status, duration, half_day_period FROM leaves WHERE id = ?').get(id) as any;
     if (!leave) throw new AppError(404, 'Leave not found');
     if (leave.user_id === reviewedById) throw new AppError(403, 'Cannot review your own leave request');
 
@@ -419,7 +434,8 @@ export class LeavesService {
       // When approved, create attendance records for each working date
       if (status === 'approved') {
         const dates = await workingDates(leave.user_id, leave.start_date, leave.end_date);
-        const notes = `${leave.type} leave - ${leave.reason ?? ''}`;
+        const durationNote = leave.duration === 'half_day' ? ` half-day leave (${leave.half_day_period ?? 'morning'})` : ' leave';
+        const notes = `${leave.type}${durationNote} - ${leave.reason ?? ''}`;
         const CHUNK = 500;
         for (let i = 0; i < dates.length; i += CHUNK) {
           const chunk = dates.slice(i, i + CHUNK);
