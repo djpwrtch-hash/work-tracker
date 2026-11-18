@@ -4,8 +4,8 @@ export interface BestLocation {
   accuracy: number;
   locationCapturedAt: string;
   success: boolean;
-  /** Where the position came from: device GPS or coarse IP geolocation. */
-  source?: 'gps' | 'ip';
+  /** Where the position came from (device GPS). */
+  source?: 'gps';
 }
 
 export interface CaptureOptions {
@@ -13,8 +13,6 @@ export interface CaptureOptions {
   timeoutMs?: number;
   maximumAge?: number;
   maxAttempts?: number;
-  /** Set false to respect the user's "Grant IP logging" toggle — skips the IP-based fallback entirely. */
-  ipEnabled?: boolean;
   /** Collection window for the high-precision GPS watch (ms). */
   windowMs?: number;
   /** Stop the window early once a fix is this accurate (metres). */
@@ -32,26 +30,12 @@ export interface CaptureResult {
   error: LocationError | null;
 }
 
-/** Fetch a coarse (~5 km) location via IP geolocation as a last resort fallback. */
-export async function fetchIpLocation(): Promise<BestLocation> {
-  const res = await fetch('https://ipapi.co/json/', { cache: 'no-store' });
-  if (!res.ok) throw new Error(`IP geolocation failed (${res.status})`);
-  const d: any = await res.json();
-  const latitude = Number(d?.latitude);
-  const longitude = Number(d?.longitude);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) throw new Error('IP geolocation returned no coordinates');
-  return {
-    latitude,
-    longitude,
-    accuracy: 5000,
-    locationCapturedAt: new Date().toISOString(),
-    success: true,
-    source: 'ip',
-  };
-}
+/**
+ * GPS-only location capture. No IP fallback.
+ * If GPS fails, callers should surface the permission/enable guidance to the user.
+ */
 
 export async function captureLocation(options: CaptureOptions = {}): Promise<CaptureResult> {
-  const ipEnabled = options.ipEnabled ?? true;
   const onProgress = options.onProgress;
 
   // 1. Secure context check
@@ -74,7 +58,6 @@ export async function captureLocation(options: CaptureOptions = {}): Promise<Cap
   // keep the best (lowest accuracy). Stop early once we hit the target (default 5 m).
   const windowMs = options.windowMs ?? 20000;
   const targetAccuracy = options.targetAccuracy ?? 5;
-  const minimumGpsAccuracy = 50; // GPS fixes up to 50 m still beat IP's ~5 km
 
   const collectHighAccuracy = (): Promise<{ candidate: BestLocation | null; error: LocationError | null }> => {
     return new Promise((resolve) => {
@@ -129,31 +112,13 @@ export async function captureLocation(options: CaptureOptions = {}): Promise<Cap
 
   const { candidate: best, error: lastError } = await collectHighAccuracy();
 
-  // 3. Acceptance criteria: any GPS fix up to minimumGpsAccuracy beats the IP fallback.
-  if (best && best.accuracy <= minimumGpsAccuracy) {
-    return { location: best, error: null };
-  }
-
-  // 4. GPS returned nothing usable. Fall back to coarse IP location (~5 km) only when the failure
-  // is permission/availability related (not timeout/noise), only if online, and only if the user
-  // granted IP logging. Otherwise respect the toggle and return the error.
-  if (!ipEnabled) {
-    console.warn('[Location] IP-based fallback skipped — IP logging is disabled in your profile.');
-    return { location: null, error: lastError ?? { code: 'PERMISSION_DENIED', message: 'IP-based fallback disabled. Enable location or IP logging in your profile, then retry.' } };
-  }
-  // If we have any coarse GPS fix at all, prefer it over IP.
+  // 3. GPS-only: any GPS fix up to the accuracy cap is accepted. No IP fallback.
   if (best) {
     return { location: best, error: null };
   }
-  if (lastError && (lastError.code === 'PERMISSION_DENIED' || lastError.code === 'POSITION_UNAVAILABLE')) {
-    try {
-      const ip = await fetchIpLocation();
-      if (ip) return { location: ip, error: null };
-    } catch {
-      // IP lookup failed (offline / blocked) — return the original error
-    }
-  }
-  return { location: null, error: lastError ?? { code: 'UNKNOWN', message: 'Failed to capture location' } };
+
+  // 4. GPS failed entirely — surface the error so the UI can guide the user to enable OS permission.
+  return { location: null, error: lastError ?? { code: 'UNKNOWN', message: 'Failed to capture location. Enable GPS and try again.' } };
 }
 
 /** Check the current permission state for geolocation (non-blocking, best effort). */

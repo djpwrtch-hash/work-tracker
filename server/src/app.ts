@@ -86,10 +86,16 @@ RateLimitStore.resetExpired().catch(() => {});
 export function createApp() {
   const app = express();
 
-  // Trust proxy hops when behind a reverse proxy (TRUST_PROXY env, e.g. "1" or "loopback")
+  // Trust Railway's reverse proxy so req.ip resolves to the real client IP.
+  // TRUST_PROXY overrides; otherwise default to 1 hop.
   const trustProxy = process.env.TRUST_PROXY;
-  if (trustProxy === 'true') app.set('trust proxy', 1);
-  else if (trustProxy && trustProxy !== 'false') app.set('trust proxy', Number(trustProxy) || trustProxy);
+  if (trustProxy === 'false') {
+    // Explicit opt-out — use direct socket address (only for local dev without a proxy)
+  } else if (trustProxy === 'true' || !trustProxy) {
+    app.set('trust proxy', 1);
+  } else {
+    app.set('trust proxy', Number(trustProxy) || trustProxy);
+  }
 
   // Request ID
   app.use((req, _res, next) => {

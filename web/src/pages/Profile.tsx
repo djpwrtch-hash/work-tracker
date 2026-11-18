@@ -191,7 +191,7 @@ export default function ProfilePage() {
                 {
                   key: 'locationEnabled',
                   label: 'Grant location access',
-                  desc: 'Allow check-in/check-out to capture your device location (Wi-Fi/IP based). Turning this off stops location collection entirely.',
+                  desc: 'Allow check-in/check-out to capture your device location via GPS. GPS-only — never IP-based. Turning this off stops location collection entirely.',
                   value: user.locationEnabled ?? true,
                   Icon: MapPin,
                 },
