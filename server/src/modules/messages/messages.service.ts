@@ -3,8 +3,46 @@ import { getIO } from '../../lib/socket.js';
 import { AppError } from '../../lib/app-error.js';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service.js';
 import { encryptText, decryptText } from '../../lib/crypto.js';
+import { getISTDate, getISTDateFromISO } from '../../lib/time.js';
+
+const MESSAGE_LIMIT = 2;
+const MAX_MESSAGE_CHARS = 100;
+
+function currentIstMonthKey(): string {
+  return getISTDate().slice(0, 7); // 'YYYY-MM'
+}
+
+function nextIstMonthFirst(): string {
+  const [y = 0, m = 1] = getISTDate().slice(0, 7).split('-').map(Number);
+  const ny = m === 12 ? y + 1 : y;
+  const nm = m === 12 ? 1 : m + 1;
+  return `${ny.toString().padStart(4, '0')}-${nm.toString().padStart(2, '0')}-01`;
+}
 
 export class MessagesService {
+  /** Number of messages the user sent this business-calendar month (IST). */
+  static async monthlySentCount(userId: string): Promise<number> {
+    const month = currentIstMonthKey();
+    const rows = await db.prepare(
+      `SELECT created_at FROM messages WHERE sender_id = ? AND created_at >= (UTC_TIMESTAMP() - INTERVAL 45 DAY)`
+    ).all(userId) as any[];
+    let count = 0;
+    for (const r of rows) {
+      const key = getISTDateFromISO(r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at)).slice(0, 7);
+      if (key === month) count += 1;
+    }
+    return count;
+  }
+
+  /** Quota snapshot for the UI. Director/HR are unlimited. */
+  static async getQuota(userId: string, accessLevel: string) {
+    const isAdmin = accessLevel === 'director' || accessLevel === 'hr';
+    if (isAdmin) return { limit: null as number | null, used: 0, remaining: null as number | null, resetsOn: nextIstMonthFirst() };
+    const used = await MessagesService.monthlySentCount(userId);
+    const limit = MESSAGE_LIMIT;
+    return { limit, used, remaining: Math.max(0, limit - used), resetsOn: nextIstMonthFirst() };
+  }
+
   /** Find or create the single thread for this employee (employee + all active HR/director). */
   static async ensureThread(userId: string): Promise<string> {
     const row = await db.prepare(
@@ -76,7 +114,13 @@ export class MessagesService {
   static async send(threadId: string, senderId: string, content: string, senderRole?: string) {
     const trimmed = content.trim();
     if (!trimmed) throw new AppError(400, 'Message cannot be empty');
-    if (trimmed.length > 4000) throw new AppError(400, 'Message too long (max 4000 characters)');
+    if (trimmed.length > MAX_MESSAGE_CHARS) throw new AppError(400, `Message too long (max ${MAX_MESSAGE_CHARS} characters)`);
+    if (senderRole === 'employee') {
+      const used = await MessagesService.monthlySentCount(senderId);
+      if (used >= MESSAGE_LIMIT) {
+        throw new AppError(429, `You have used all ${MESSAGE_LIMIT} messages for this month. Credits reset on the 1st.`);
+      }
+    }
     await MessagesService.assertParticipant(threadId, senderId, senderRole);
 
     const id = uuid();

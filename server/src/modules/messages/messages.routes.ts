@@ -25,6 +25,13 @@ router.post('/threads/ensure/:employeeId', requireUuid('employeeId'), async (req
   } catch (err) { next(err); }
 });
 
+/** Current send quota (employee: 2/month; director/HR unlimited). */
+router.get('/quota', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await MessagesService.getQuota(req.user!.sub, req.user!.accessLevel));
+  } catch (err) { next(err); }
+});
+
 /** Unread count for the current user (for the Chat nav badge). */
 router.get('/threads/unread-count', async (req: Request, res: Response, next: NextFunction) => {
   try {

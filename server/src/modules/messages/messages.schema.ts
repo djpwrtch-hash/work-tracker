@@ -1,7 +1,11 @@
 import { z } from 'zod';
 
 export const sendMessageSchema = z.object({
-  content: z.string().trim().min(1, 'Message cannot be empty').max(4000, 'Message too long'),
+  content: z
+    .string()
+    .trim()
+    .min(1, 'Message cannot be empty')
+    .max(100, 'Message too long (max 100 characters)'),
 });
 
 export const listMessagesSchema = z.object({

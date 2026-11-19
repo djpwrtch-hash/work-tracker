@@ -27,6 +27,14 @@ export default function ChatPage() {
     enabled: !!user,
   });
 
+  // Monthly send quota
+  const { data: quotaData } = useQuery({
+    queryKey: ['chatQuota'],
+    queryFn: async () => (await api.get('/messages/quota')).data,
+    refetchOnWindowFocus: true,
+    enabled: !!user,
+  });
+
   // Messages in selected thread
   const { data: messagesData, isLoading: msgLoading } = useQuery({
     queryKey: ['chatMessages', selectedThread],
@@ -36,6 +44,11 @@ export default function ChatPage() {
 
   const threads: any[] = threadsData?.threads ?? [];
   const messages: any[] = messagesData?.messages ?? [];
+  const quotaLimit: number | null = quotaData?.limit ?? null;
+  const quotaRemaining: number | null = quotaData?.remaining ?? null;
+  const resetsOn: string = quotaData?.resetsOn ?? '';
+  const isUnlimited = quotaLimit === null;
+  const isBlocked = !isUnlimited && quotaRemaining === 0;
 
   // Auto-select the thread (employee view has exactly one)
   useEffect(() => {
@@ -46,8 +59,8 @@ export default function ChatPage() {
 
   const sendMutation = useMutation({
     mutationFn: async ({ threadId, content }: { threadId: string; content: string }) => (await api.post(`/messages/threads/${threadId}`, { content })).data,
-    onSuccess: () => { setMessage(''); qc.invalidateQueries({ queryKey: ['chatMessages', selectedThread] }); qc.invalidateQueries({ queryKey: ['chatThreads'] }); qc.invalidateQueries({ queryKey: ['chatUnread'] }); },
-    onError: (e) => toast.error(getApiError(e, 'Failed to send message')),
+    onSuccess: () => { setMessage(''); qc.invalidateQueries({ queryKey: ['chatMessages', selectedThread] }); qc.invalidateQueries({ queryKey: ['chatThreads'] }); qc.invalidateQueries({ queryKey: ['chatUnread'] }); qc.invalidateQueries({ queryKey: ['chatQuota'] }); },
+    onError: (e) => { qc.invalidateQueries({ queryKey: ['chatQuota'] }); toast.error(getApiError(e, 'Failed to send message')); },
   });
 
   const ensureThread = useMutation({
@@ -109,6 +122,7 @@ export default function ChatPage() {
   const handleSend = () => {
     const content = message.trim();
     if (!content || !selectedThread) return;
+    if (isBlocked) { toast.error(`You have used all ${quotaLimit} messages for this month. Credits reset on the 1st.`); return; }
     sendMutation.mutate({ threadId: selectedThread, content });
   };
 
@@ -170,7 +184,7 @@ export default function ChatPage() {
             {isAdmin && <Avatar user={undefined} firstName="?" lastName="?" />}
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-white">{headerTitle}</p>
-              <p className="text-[11px] text-slate-500">{isAdmin ? 'Employee conversation' : 'Private messages to HR'}</p>
+              <p className="text-[11px] text-slate-500">{isAdmin ? 'Employee conversation' : (isUnlimited ? 'Private messages to HR' : `${quotaRemaining} of ${quotaLimit} messages left this month`)}</p>
             </div>
           </div>
 
@@ -207,15 +221,28 @@ export default function ChatPage() {
             <div ref={bottomRef} />
           </div>
 
+          {selectedThread && !isUnlimited && (
+            <div className={`border-t border-slate-800 px-4 py-2 text-[11px] ${isBlocked ? 'bg-rose-500/10 text-rose-400' : quotaRemaining === 1 ? 'bg-amber-500/10 text-amber-400' : 'bg-slate-800/40 text-slate-400'}`}>
+              {isBlocked
+                ? `You have used all ${quotaLimit} messages for this month. Credits reset on the 1st (${resetsOn}).`
+                : `You can send up to ${quotaLimit} messages per month. You have ${quotaRemaining} left. Credits reset on the 1st (${resetsOn}).`}
+            </div>
+          )}
+
           {selectedThread && (
           <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="flex items-center gap-2 border-t border-slate-800 p-3">
-            <input
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="Type a message..."
-              className="flex-1 rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-violet-500"
-            />
-            <button type="submit" disabled={!message.trim() || sendMutation.isPending} aria-label="Send" className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-600 text-white hover:bg-violet-700 transition disabled:opacity-50">
+            <div className="relative flex-1">
+              <input
+                value={message}
+                onChange={(e) => setMessage(e.target.value.slice(0, 100))}
+                placeholder="Type a message..."
+                maxLength={100}
+                disabled={isBlocked}
+                className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-violet-500 disabled:opacity-50"
+              />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-slate-500">{message.length}/100</span>
+            </div>
+            <button type="submit" disabled={!message.trim() || sendMutation.isPending || isBlocked} aria-label="Send" className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-600 text-white hover:bg-violet-700 transition disabled:opacity-50">
               {sendMutation.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </button>
           </form>
