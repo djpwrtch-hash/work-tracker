@@ -2,6 +2,7 @@ import db, { uuid } from '../../db/index.js';
 import { AppError } from '../../lib/app-error.js';
 import { getISTDate } from '../../lib/time.js';
 import { sendTaskAssignment } from '../../lib/email.js';
+import { getIO } from '../../lib/socket.js';
 
 function mapTask(t: any) {
   return {
@@ -114,7 +115,7 @@ export class TasksService {
       if (!isAssignee && t.created_by_id !== userId) throw new AppError(403, 'Forbidden');
     }
     const assignees = await db.prepare(`SELECT ta.user_id, u.first_name, u.last_name, u.employee_id FROM task_assignments ta JOIN users u ON ta.user_id = u.id WHERE ta.task_id = ?`).all(id);
-    const comments = await db.prepare('SELECT tc.*, u.first_name, u.last_name FROM task_comments tc JOIN users u ON tc.author_id = u.id WHERE tc.task_id = ? ORDER BY tc.created_at DESC').all(id);
+    const comments = await db.prepare('SELECT tc.*, u.first_name, u.last_name FROM task_comments tc JOIN users u ON tc.author_id = u.id WHERE tc.task_id = ? ORDER BY tc.created_at ASC, tc.id ASC').all(id);
     const approvals = (await db.prepare('SELECT * FROM task_approvals WHERE task_id = ? ORDER BY requested_at DESC').all(id) as any[]).map((a: any) => ({
       id: a.id, taskId: a.task_id, requestedById: a.requested_by_id, status: a.status,
       requestComment: a.request_comment, reviewedById: a.reviewed_by_id, comment: a.comment,
@@ -200,7 +201,17 @@ export class TasksService {
     const id = uuid();
     await db.prepare('INSERT INTO task_comments (id, task_id, author_id, message) VALUES (?, ?, ?, ?)').run(id, taskId, authorId, message);
     const comment = await db.prepare('SELECT tc.*, u.first_name, u.last_name FROM task_comments tc JOIN users u ON tc.author_id = u.id WHERE tc.id = ?').get(id);
-    return mapComment(comment);
+    const shaped = mapComment(comment);
+    // Real-time broadcast to assignees + creator + admins
+    try {
+      const recipients = await db.prepare('SELECT DISTINCT user_id FROM task_assignments WHERE task_id = ? UNION SELECT created_by_id FROM tasks WHERE id = ?').all(taskId, taskId) as any[];
+      const adminIds = await db.prepare("SELECT u.id FROM users u JOIN roles r ON r.name = u.role WHERE r.access_level IN ('director', 'hr')").all() as any[];
+      const ids = new Set<string>([...recipients.map((r: any) => r.user_id), ...adminIds.map((r: any) => r.id)]);
+      for (const rid of ids) {
+        if (rid) getIO().to(`user:${rid}`).emit('task:comment', { taskId, comment: shaped });
+      }
+    } catch (e) { console.error('[Tasks] Socket emit failed:', e); }
+    return shaped;
   }
 
   static async getComments(taskId: string, userId: string, role: string) {
@@ -210,7 +221,7 @@ export class TasksService {
       const task = await db.prepare('SELECT created_by_id FROM tasks WHERE id = ?').get(taskId) as any;
       if (!isAssignee && task.created_by_id !== userId) throw new AppError(403, 'Forbidden');
     }
-    const comments = await db.prepare('SELECT tc.*, u.first_name, u.last_name FROM task_comments tc JOIN users u ON tc.author_id = u.id WHERE tc.task_id = ? ORDER BY tc.created_at DESC').all(taskId) as any[];
+    const comments = await db.prepare('SELECT tc.*, u.first_name, u.last_name FROM task_comments tc JOIN users u ON tc.author_id = u.id WHERE tc.task_id = ? ORDER BY tc.created_at ASC, tc.id ASC').all(taskId) as any[];
     return { comments: comments.map(mapComment) };
   }
 

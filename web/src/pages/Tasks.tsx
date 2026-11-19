@@ -3,7 +3,8 @@ import { useAuth } from '@/context/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, getApiError } from '@/lib/api';
 import { formatDate, formatDateTime, statusColor } from '@/lib/utils';
-import { useState, useEffect, useMemo } from 'react';
+import { listenOnSocket } from '@/lib/socket';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Plus, Loader2, Search, MessageSquare, Send, Download, Trash2 } from 'lucide-react';
 import { dynamic } from '@/lib/dynamic';
 import type { ExportColumn } from '@/components/ExportDialog';
@@ -104,6 +105,22 @@ export default function TasksPage() {
     queryFn: async () => (await api.get(`/tasks/${showComments}/comments`)).data,
     enabled: !loading && !!user && !!showComments,
   });
+
+  // Real-time task comments (socket) — refresh thread when anyone comments
+  useEffect(() => {
+    if (!showComments) return;
+    const handler = (payload: any) => {
+      if (!payload || payload.taskId !== showComments) return;
+      qc.invalidateQueries({ queryKey: ['taskComments', showComments] });
+    };
+    const unsub = listenOnSocket({ 'task:comment': handler });
+    return unsub;
+  }, [showComments, qc]);
+
+  const commentsEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    commentsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [comments?.comments?.length]);
 
   const addComment = useMutation({
     mutationFn: async (taskId: string) => (await api.post(`/tasks/${taskId}/comments`, { message: commentText })).data,
@@ -340,20 +357,24 @@ export default function TasksPage() {
           onClose={() => setShowComments(null)}
           title="Task Comments"
         >
-          <div className="space-y-4 max-h-60 overflow-y-auto mb-4">
+          <div className="space-y-2 max-h-72 overflow-y-auto mb-3 pr-1">
             {comments?.comments?.length === 0 ? (
-              <p className="text-center text-slate-500 py-4">No comments yet</p>
+              <p className="text-center text-slate-500 py-6">No comments yet</p>
             ) : (
-              comments?.comments?.map((c: any) => (
-                <div key={c.id} className="bg-slate-800 rounded-xl p-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-sm font-medium text-white">{c.firstName} {c.lastName}</span>
-                    <span className="text-xs text-slate-500">{formatDateTime(c.createdAt)}</span>
+              comments?.comments?.map((c: any) => {
+                const mine = c.authorId === user?.id;
+                return (
+                  <div key={c.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm shadow ${mine ? 'rounded-br-md bg-violet-600 text-white' : 'rounded-bl-md bg-slate-800 text-slate-100'}`}>
+                      {!mine && <p className="text-[10px] font-semibold text-violet-300 mb-0.5">{c.firstName} {c.lastName}</p>}
+                      <p className="whitespace-pre-wrap break-words">{c.message}</p>
+                      <span className={`mt-1 block text-[10px] ${mine ? 'text-violet-200' : 'text-slate-500'}`}>{formatDateTime(c.createdAt)}</span>
+                    </div>
                   </div>
-                  <p className="text-sm text-slate-300">{c.message}</p>
-                </div>
-              ))
+                );
+              })
             )}
+            <div ref={commentsEndRef} />
           </div>
           <div className="flex gap-2">
             <input value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Add a comment..." className="flex-1 rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" />
