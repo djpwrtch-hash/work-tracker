@@ -180,7 +180,7 @@ export default function TeamPage() {
         {isLoading ? (
           <div className="text-center py-8 text-slate-500">Loading...</div>
         ) : data?.length === 0 ? (
-          <div className="text-center py-12 text-slate-500"><Users className="h-12 w-12 mx-auto mb-3 opacity-30" /><p>No teams created yet</p></div>
+          <div className="text-center py-12 text-slate-500"><Users className="h-12 w-12 mx-auto mb-3 opacity-30" /><p>{isAdmin ? 'No teams created yet' : 'You are not part of any team yet'}</p></div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {data?.map((team: any) => (
@@ -194,14 +194,17 @@ export default function TeamPage() {
                     <p className="text-xs text-slate-400">{team.memberCount} members</p>
                   </div>
                 </div>
-                {isAdmin && (
-                  <div className="flex flex-wrap gap-1.5 mb-4 pb-4 border-b border-slate-800">
-                    <button onClick={() => setShowManage(team.teamName)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-xs font-medium" aria-label="Manage Members"><UserPlus className="h-3.5 w-3.5" />Members</button>
-                    <button onClick={() => { setShowTasks(team.teamName); setTaskForm((f) => ({ ...f, assigneeIds: (team.members ?? []).map((m: any) => m.userId) })); }} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-xs font-medium" aria-label="Team Tasks"><Briefcase className="h-3.5 w-3.5" />Tasks</button>
-                    <button onClick={() => setShowDashboard(team.teamName)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-xs font-medium" aria-label="Team Dashboard"><Clock className="h-3.5 w-3.5" />Dashboard</button>
-                    <button onClick={async () => { if (await confirm({ title: 'Delete Team', message: 'This will permanently remove this team and all its members. Continue?', variant: 'danger', confirmText: 'Delete' })) deleteTeam.mutate(team.teamName); }} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition text-xs font-medium" aria-label="Delete Team"><Trash2 className="h-3.5 w-3.5" />Delete</button>
-                  </div>
-                )}
+                {/* Tasks & Dashboard are available to all team members (employees included) */}
+                <div className="flex flex-wrap gap-1.5 mb-4 pb-4 border-b border-slate-800">
+                  <button onClick={() => { setShowTasks(team.teamName); setTaskForm((f) => ({ ...f, assigneeIds: (team.members ?? []).map((m: any) => m.userId) })); }} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-xs font-medium" aria-label="Team Tasks"><Briefcase className="h-3.5 w-3.5" />Tasks</button>
+                  <button onClick={() => setShowDashboard(team.teamName)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-xs font-medium" aria-label="Team Dashboard"><Clock className="h-3.5 w-3.5" />Dashboard</button>
+                  {isAdmin && (
+                    <>
+                      <button onClick={() => setShowManage(team.teamName)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-xs font-medium" aria-label="Manage Members"><UserPlus className="h-3.5 w-3.5" />Members</button>
+                      <button onClick={async () => { if (await confirm({ title: 'Delete Team', message: 'This will permanently remove this team and all its members. Continue?', variant: 'danger', confirmText: 'Delete' })) deleteTeam.mutate(team.teamName); }} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition text-xs font-medium" aria-label="Delete Team"><Trash2 className="h-3.5 w-3.5" />Delete</button>
+                    </>
+                  )}
+                </div>
                 <div className="space-y-2">
                   {team.members.map((m: any) => (
                     <div key={m.userId} className="flex items-center gap-2 text-sm">
