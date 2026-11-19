@@ -484,12 +484,6 @@ export class LeavesService {
     // directors/hr can cancel own leaves (pending or approved) — no peer required for cancel
     if (leave.status === 'cancelled') throw new AppError(409, 'Leave already cancelled');
 
-    const today = getISTDate();
-    if (today >= leave.start_date && today <= leave.end_date) {
-      const workedToday = await db.prepare("SELECT 1 FROM attendance WHERE user_id = ? AND date = ? AND status IN ('present','work_end','on_break','half_day')").get(leave.user_id, today);
-      if (workedToday && role !== 'director') throw new AppError(409, 'Cannot cancel leave: the user has already worked today');
-    }
-
     const result = await db.transaction(async () => {
       await db.prepare("UPDATE leaves SET status = 'cancelled', updated_at = NOW() WHERE id = ?").run(id);
       const dates = iterDates(leave.start_date, leave.end_date);
@@ -498,6 +492,12 @@ export class LeavesService {
         await db.prepare(`UPDATE attendance SET status = 'absent', notes = NULL, updated_at = NOW() WHERE user_id = ? AND status = 'leave' AND date IN (${placeholders})`).run(leave.user_id, ...dates);
       }
       invalidateAnalyticsCache();
+      try {
+        const reviewer = await db.prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(userId) as any;
+        const reviewerName = reviewer ? `${reviewer.first_name} ${reviewer.last_name}`.trim() : 'An admin';
+        await db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(uuid(), leave.user_id, userId, 'Leave cancelled', `Your ${leave.type} leave (${leave.start_date} → ${leave.end_date}) was cancelled by ${reviewerName}. You may now check in.`, 'info', '/leaves');
+      } catch (e) { console.error('[Notifications] Failed:', e); }
       try {
         await ActivityLogsService.createDiff(userId, 'cancel_leave', 'leave', id, `Cancelled ${leave.type} leave (${leave.start_date} → ${leave.end_date})`);
       } catch (e) { console.error('[ActivityLogs] Failed:', e); }

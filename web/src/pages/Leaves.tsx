@@ -11,6 +11,8 @@ import type { ExportColumn } from '@/components/ExportDialog';
 import ResponsiveTable, { type Column } from '@/components/ResponsiveTable';
 import Badge from '@/components/Badge';
 import Modal from '@/components/Modal';
+import { useConfirm } from '@/components/ConfirmDialog';
+import { toast } from 'sonner';
 
 const ExportDialog = dynamic(() => import('@/components/ExportDialog'), { ssr: false });
 const Calendar = dynamic(() => import('@/components/Calendar'), { ssr: false });
@@ -59,6 +61,7 @@ function LeaveBalances({ userId }: { userId: string }) {
 
 export default function LeavesPage() {
   const { user, loading } = useAuth();
+  const { confirm } = useConfirm();
   const qc = useQueryClient();
   const isAdmin = user?.accessLevel === 'director' || user?.accessLevel === 'hr';
   const [showCreate, setShowCreate] = useState(false);
@@ -288,6 +291,7 @@ export default function LeavesPage() {
       });
       return { prev };
     },
+    onSuccess: () => { toast.success('Leave cancelled. The employee can now check in.'); },
     onError: (_e, _vars, ctx) => { if (ctx?.prev) ctx.prev.forEach((kv: any[]) => qc.setQueryData(kv[0], kv[1])); setError('Cancel failed'); },
     onSettled: () => { qc.invalidateQueries({ queryKey: ['leaves'] }); qc.invalidateQueries({ queryKey: ['leaveBal'] }); },
   });
@@ -374,7 +378,7 @@ export default function LeavesPage() {
                 </>
               )}
               {isAdmin && l.status === 'approved' && (user?.accessLevel === 'director' || l.userId !== user?.id) && (
-                <button onClick={() => cancelLeave.mutate(l.id)} disabled={cancelLeave.isPending} className="rounded-lg bg-slate-600 hover:bg-slate-700 text-white px-3 py-1.5 text-xs transition disabled:opacity-50">Cancel</button>
+                <button onClick={async () => { const ok = await confirm({ title: 'Cancel leave', message: `Cancel this ${l.type} leave (${l.startDate?.slice(0, 10)} → ${l.endDate?.slice(0, 10)})? The employee will be notified and can check in again.`, variant: 'warning', confirmText: 'Cancel leave' }); if (ok) cancelLeave.mutate(l.id); }} disabled={cancelLeave.isPending} className="rounded-lg bg-slate-600 hover:bg-slate-700 text-white px-3 py-1.5 text-xs transition disabled:opacity-50">Cancel</button>
               )}
             </>
           )}
