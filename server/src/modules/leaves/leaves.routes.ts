@@ -5,7 +5,7 @@ import { requireRole } from '../../middleware/rbac.js';
 import { apiCache } from '../../middleware/api-cache.js';
 import { AppError } from '../../lib/app-error.js';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service.js';
-import { createLeaveSchema, listLeavesSchema, reviewLeaveSchema } from './leaves.schema.js';
+import { createLeaveSchema, listLeavesSchema, reviewLeaveSchema, cancelLeaveSchema } from './leaves.schema.js';
 import { LeavesService } from './leaves.service.js';
 
 const router = Router();
@@ -55,9 +55,10 @@ router.post('/:id/review', requireRole('director', 'hr'), requireUuid('id'), val
   } catch (err) { next(err); }
 });
 
-router.post('/:id/cancel', requireUuid('id'), async (req: Request, res: Response, next) => {
+router.post('/:id/cancel', requireUuid('id'), validate(cancelLeaveSchema), async (req: Request, res: Response, next) => {
   try {
-    const leave = await LeavesService.cancel(req.params.id!, req.user!.sub, req.user!.accessLevel);
+    const body = req.body ?? {};
+    const leave = await LeavesService.cancel(req.params.id!, req.user!.sub, req.user!.accessLevel, body.cancelledDates);
     res.json(leave);
   } catch (err) { next(err); }
 });

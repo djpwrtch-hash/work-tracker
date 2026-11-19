@@ -305,6 +305,7 @@ CREATE TABLE IF NOT EXISTS leaves (
   reason TEXT,
   duration VARCHAR(10) NOT NULL DEFAULT 'full_day',
   half_day_period VARCHAR(10) NULL,
+  cancelled_dates JSON NULL,
   deducted_from VARCHAR(20),
   reviewed_by_id VARCHAR(36),
   review_comment TEXT,

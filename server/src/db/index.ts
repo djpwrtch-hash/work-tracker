@@ -740,6 +740,13 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       await db.exec("UPDATE users SET location_enabled = 1, ip_enabled = 1");
     },
   },
+  {
+    version: 36,
+    name: 'leave-cancelled-dates',
+    up: async () => {
+      await addColumnIfMissing('leaves', 'cancelled_dates', "cancelled_dates JSON NULL");
+    },
+  },
 ];
 
 await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (

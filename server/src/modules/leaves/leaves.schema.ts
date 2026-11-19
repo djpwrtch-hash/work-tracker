@@ -42,5 +42,9 @@ export const reviewLeaveSchema = z.object({
   reviewComment: z.string().trim().optional(),
 }).refine((d) => d.status !== 'rejected' || (!!d.reviewComment && d.reviewComment.trim().length > 0), { message: 'Rejection reason is required', path: ['reviewComment'] });
 
+export const cancelLeaveSchema = z.object({
+  cancelledDates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional(),
+});
+
 export type CreateLeaveInput = z.infer<typeof createLeaveSchema>;
 export type ListLeavesInput = z.infer<typeof listLeavesSchema>;

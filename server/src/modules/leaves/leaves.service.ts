@@ -41,12 +41,15 @@ function invalidateAnalyticsCache() {
 const PROTECTED_STATUSES = "('present','work_end','on_break','half_day','holiday','remote')";
 
 function mapLeave(l: any) {
+  let cancelledDates: string[] = [];
+  try { cancelledDates = l.cancelled_dates ? JSON.parse(l.cancelled_dates) : []; } catch { cancelledDates = []; }
   return {
     id: l.id, userId: l.user_id, type: l.type, startDate: l.start_date, endDate: l.end_date,
     reason: l.reason, status: l.status, reviewComment: l.review_comment,
     reviewedById: l.reviewed_by_id, reviewedAt: l.reviewed_at,
     reviewerFirstName: l.reviewer_first_name ?? null, reviewerLastName: l.reviewer_last_name ?? null,
     duration: l.duration ?? 'full_day', halfDayPeriod: l.half_day_period ?? null,
+    cancelledDates,
     createdAt: l.created_at, updatedAt: l.updated_at,
     firstName: l.first_name, lastName: l.last_name, employeeId: l.employee_id,
     deductedFrom: l.deducted_from, extra: l.extra ?? 0, leaveYear: l.leave_year,
@@ -159,7 +162,7 @@ interface LeaveUsage {
 
 async function computeUsage(userId: string, year: number): Promise<LeaveUsage> {
   const requests = await db.prepare(
-    "SELECT id, start_date, end_date, status, leave_year, duration FROM leaves WHERE user_id = ? AND status = 'approved'"
+    "SELECT id, start_date, end_date, status, leave_year, duration, cancelled_dates FROM leaves WHERE user_id = ? AND status = 'approved'"
   ).all(userId) as any[];
 
   // Collect all (clampedStart, clampedEnd) ranges so we can batch the holiday query.
@@ -185,11 +188,16 @@ async function computeUsage(userId: string, year: number): Promise<LeaveUsage> {
   const byYear = new Map<number, number>();
   for (const r of requests) {
     const ry = r.leave_year ?? yearOf(r.start_date);
+    let cancelled: string[] = [];
+    try { cancelled = r.cancelled_dates ? JSON.parse(r.cancelled_dates) : []; } catch { cancelled = []; }
+    const cancelCount = Array.isArray(cancelled) ? cancelled.length : 0;
     if (r.duration === 'half_day') {
-      byYear.set(ry, (byYear.get(ry) ?? 0) + 0.5);
+      // A half-day leave is a single day; if it's cancelled, it counts as 0
+      byYear.set(ry, (byYear.get(ry) ?? 0) + (cancelCount > 0 ? 0 : 0.5));
       continue;
     }
-    byYear.set(ry, (byYear.get(ry) ?? 0) + await daysWithinYear(userId, r.start_date, r.end_date, ry, holidayCache));
+    const base = await daysWithinYear(userId, r.start_date, r.end_date, ry, holidayCache);
+    byYear.set(ry, (byYear.get(ry) ?? 0) + Math.max(0, base - cancelCount));
   }
 
   // Each year uses pro-rated entitlement (based on joining date). Days beyond it are extra leave.
@@ -470,8 +478,8 @@ export class LeavesService {
     return updated;
   }
 
-  static async cancel(id: string, userId: string, role: string) {
-    const leave = await db.prepare('SELECT id, user_id, type, start_date, end_date, status FROM leaves WHERE id = ?').get(id) as any;
+  static async cancel(id: string, userId: string, role: string, cancelledDates?: string[]) {
+    const leave = await db.prepare("SELECT id, user_id, type, start_date, end_date, status, duration, half_day_period, cancelled_dates FROM leaves WHERE id = ?").get(id) as any;
     if (!leave) throw new AppError(404, 'Leave not found');
 
     const isOwner = leave.user_id === userId;
@@ -484,24 +492,43 @@ export class LeavesService {
     // directors/hr can cancel own leaves (pending or approved) — no peer required for cancel
     if (leave.status === 'cancelled') throw new AppError(409, 'Leave already cancelled');
 
+    // Resolve which dates to cancel (subset of the leave range). If none provided, cancel all.
+    const rangeDates = iterDates(leave.start_date, leave.end_date);
+    const requestedDates = Array.isArray(cancelledDates) ? cancelledDates.map(String) : rangeDates;
+    const inRange = requestedDates.filter((d) => rangeDates.includes(d));
+    if (requestedDates.length > 0 && inRange.length === 0) throw new AppError(400, 'No matching dates in the leave range');
+
+    const previous: string[] = (() => {
+      try { return leave.cancelled_dates ? JSON.parse(leave.cancelled_dates) : []; } catch { return []; }
+    })();
+    const merged = Array.from(new Set([...previous, ...inRange])).sort();
+    const remaining = rangeDates.filter((d) => !merged.includes(d));
+    const willFullyCancel = remaining.length === 0;
+
     const result = await db.transaction(async () => {
-      await db.prepare("UPDATE leaves SET status = 'cancelled', updated_at = NOW() WHERE id = ?").run(id);
-      const dates = iterDates(leave.start_date, leave.end_date);
-      if (dates.length > 0) {
-        const placeholders = dates.map(() => '?').join(',');
-        await db.prepare(`UPDATE attendance SET status = 'absent', notes = NULL, updated_at = NOW() WHERE user_id = ? AND status = 'leave' AND date IN (${placeholders})`).run(leave.user_id, ...dates);
+      if (willFullyCancel) {
+        await db.prepare("UPDATE leaves SET status = 'cancelled', cancelled_dates = ?, updated_at = NOW() WHERE id = ?").run(JSON.stringify(merged), id);
+      } else {
+        await db.prepare("UPDATE leaves SET cancelled_dates = ?, updated_at = NOW() WHERE id = ?").run(JSON.stringify(merged), id);
       }
+
+      if (inRange.length > 0) {
+        const placeholders = inRange.map(() => '?').join(',');
+        await db.prepare(`UPDATE attendance SET status = 'absent', notes = NULL, updated_at = NOW() WHERE user_id = ? AND status = 'leave' AND date IN (${placeholders})`).run(leave.user_id, ...inRange);
+      }
+
       invalidateAnalyticsCache();
       try {
         const reviewer = await db.prepare('SELECT first_name, last_name FROM users WHERE id = ?').get(userId) as any;
         const reviewerName = reviewer ? `${reviewer.first_name} ${reviewer.last_name}`.trim() : 'An admin';
+        const scope = willFullyCancel ? 'all days cancelled' : `${inRange.length} day(s) cancelled (${inRange.join(', ')})`;
         await db.prepare('INSERT INTO notifications (id, recipient_id, sender_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?, ?)')
-          .run(uuid(), leave.user_id, userId, 'Leave cancelled', `Your ${leave.type} leave (${leave.start_date} → ${leave.end_date}) was cancelled by ${reviewerName}. You may now check in.`, 'info', '/leaves');
+          .run(uuid(), leave.user_id, userId, 'Leave cancelled', `Your ${leave.type} leave (${leave.start_date} → ${leave.end_date}) was cancelled by ${reviewerName} — ${scope}. You may now check in.`, 'info', '/leaves');
       } catch (e) { console.error('[Notifications] Failed:', e); }
       try {
-        await ActivityLogsService.createDiff(userId, 'cancel_leave', 'leave', id, `Cancelled ${leave.type} leave (${leave.start_date} → ${leave.end_date})`);
+        await ActivityLogsService.createDiff(userId, 'cancel_leave', 'leave', id, `Cancelled ${leave.type} leave (${inRange.join(', ') || 'all'})`);
       } catch (e) { console.error('[ActivityLogs] Failed:', e); }
-      return mapLeave(await db.prepare('SELECT l.id, l.user_id, l.type, l.start_date, l.end_date, l.reason, l.status, l.review_comment, l.reviewed_by_id, l.reviewed_at, l.deducted_from, l.extra, l.leave_year, l.created_at, l.updated_at, u.first_name, u.last_name, u.employee_id, r.first_name AS reviewer_first_name, r.last_name AS reviewer_last_name FROM leaves l JOIN users u ON l.user_id = u.id LEFT JOIN users r ON r.id = l.reviewed_by_id WHERE l.id = ?').get(id));
+      return mapLeave(await db.prepare('SELECT l.id, l.user_id, l.type, l.start_date, l.end_date, l.reason, l.status, l.review_comment, l.reviewed_by_id, l.reviewed_at, l.deducted_from, l.extra, l.leave_year, l.created_at, l.updated_at, l.cancelled_dates, u.first_name, u.last_name, u.employee_id, r.first_name AS reviewer_first_name, r.last_name AS reviewer_last_name FROM leaves l JOIN users u ON l.user_id = u.id LEFT JOIN users r ON r.id = l.reviewed_by_id WHERE l.id = ?').get(id));
     })();
     await cache.delByPrefix(`${leave.user_id}:/api/v1/leaves/balance`);
     return result;

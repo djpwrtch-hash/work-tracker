@@ -211,13 +211,13 @@ export function createApp() {
       ).get() as any;
       const version = Number(migration?.version ?? 0);
       const tableCount = Number(tables?.count ?? 0);
-      if (version < 35 || tableCount < 10) {
+      if (version < 36 || tableCount < 10) {
         res.status(503).json({
           status: 'not ready',
           timestamp,
           checks: {
             database: 'ok',
-            schema: version >= 35 ? 'ok' : `migration ${version}/35`,
+            schema: version >= 36 ? 'ok' : `migration ${version}/36`,
             coreTables: `${tableCount}/10`,
           },
         });

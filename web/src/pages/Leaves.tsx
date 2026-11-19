@@ -11,7 +11,6 @@ import type { ExportColumn } from '@/components/ExportDialog';
 import ResponsiveTable, { type Column } from '@/components/ResponsiveTable';
 import Badge from '@/components/Badge';
 import Modal from '@/components/Modal';
-import { useConfirm } from '@/components/ConfirmDialog';
 import { toast } from 'sonner';
 
 const ExportDialog = dynamic(() => import('@/components/ExportDialog'), { ssr: false });
@@ -34,6 +33,17 @@ function countWorkingDays(start: string, end: string, excluded: Set<string>): nu
 
 function getTodayIST(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
+
+function expandDateRange(start: string, end: string): string[] {
+  const out: string[] = [];
+  const cur = new Date(`${start}T00:00:00Z`);
+  const endD = new Date(`${end}T00:00:00Z`);
+  while (cur <= endD) {
+    out.push(cur.toISOString().split('T')[0]!);
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return out;
 }
 
 function LeaveBalances({ userId }: { userId: string }) {
@@ -61,7 +71,6 @@ function LeaveBalances({ userId }: { userId: string }) {
 
 export default function LeavesPage() {
   const { user, loading } = useAuth();
-  const { confirm } = useConfirm();
   const qc = useQueryClient();
   const isAdmin = user?.accessLevel === 'director' || user?.accessLevel === 'hr';
   const [showCreate, setShowCreate] = useState(false);
@@ -135,6 +144,7 @@ export default function LeavesPage() {
           </span> },
       { header: 'Reason', key: 'reason', render: (l: any) => <span className="text-slate-300 text-xs">{l.reason || '-'}</span> },
       { header: 'Duration', key: 'duration', render: (l: any) => l.duration === 'half_day' ? <span className="inline-flex items-center rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-300">Half day{l.halfDayPeriod ? ` (${l.halfDayPeriod})` : ''}</span> : <span className="text-slate-300 text-xs">Full day</span> },
+      { header: 'Cancelled', key: 'cancelled', render: (l: any) => Array.isArray(l.cancelledDates) && l.cancelledDates.length > 0 ? <span className="inline-flex flex-wrap gap-1 text-[10px] text-rose-400">{l.cancelledDates.map((d: string) => <span key={d} className="rounded bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 font-mono">{d.slice(5)}</span>)}</span> : <span className="text-slate-600 text-xs">-</span> },
       { header: 'Review', key: 'review', render: (l: any) => l.status === 'rejected' && (l.reviewerFirstName || l.reviewerLastName)
         ? <span className="text-rose-400 text-xs">Rejected by <span className="font-semibold">{l.reviewerFirstName} {l.reviewerLastName}</span>{l.reviewComment ? <><br />{l.reviewComment}</> : null}</span>
         : l.status === 'approved' && (l.reviewerFirstName || l.reviewerLastName)
@@ -276,10 +286,13 @@ export default function LeavesPage() {
     onSettled: () => { qc.invalidateQueries({ queryKey: ['leaves'] }); qc.invalidateQueries({ queryKey: ['leaveBal'] }); },
   });
 
+  const [cancelModal, setCancelModal] = useState<{ id: string; type: string; startDate: string; endDate: string; dates: string[] } | null>(null);
+  const [cancelSelected, setCancelSelected] = useState<Set<string>>(new Set());
+
   const cancelLeave = useMutation({
     retry: 0,
-    mutationFn: async (id: string) => (await api.post(`/leaves/${id}/cancel`)).data,
-    onMutate: async (id) => {
+    mutationFn: async ({ id, cancelledDates }: { id: string; cancelledDates: string[] }) => (await api.post(`/leaves/${id}/cancel`, { cancelledDates })).data,
+    onMutate: async ({ id }) => {
       await qc.cancelQueries({ queryKey: ['leaves'] });
       const queries = qc.getQueriesData({ queryKey: ['leaves'] });
       const prev: any[] = queries.map((q: any) => [q[0], q[1]]);
@@ -291,7 +304,7 @@ export default function LeavesPage() {
       });
       return { prev };
     },
-    onSuccess: () => { toast.success('Leave cancelled. The employee can now check in.'); },
+    onSuccess: () => { toast.success('Leave cancelled. The employee can now check in.'); setCancelModal(null); },
     onError: (_e, _vars, ctx) => { if (ctx?.prev) ctx.prev.forEach((kv: any[]) => qc.setQueryData(kv[0], kv[1])); setError('Cancel failed'); },
     onSettled: () => { qc.invalidateQueries({ queryKey: ['leaves'] }); qc.invalidateQueries({ queryKey: ['leaveBal'] }); },
   });
@@ -378,7 +391,7 @@ export default function LeavesPage() {
                 </>
               )}
               {isAdmin && l.status === 'approved' && (user?.accessLevel === 'director' || l.userId !== user?.id) && (
-                <button onClick={async () => { const ok = await confirm({ title: 'Cancel leave', message: `Cancel this ${l.type} leave (${l.startDate?.slice(0, 10)} → ${l.endDate?.slice(0, 10)})? The employee will be notified and can check in again.`, variant: 'warning', confirmText: 'Cancel leave' }); if (ok) cancelLeave.mutate(l.id); }} disabled={cancelLeave.isPending} className="rounded-lg bg-slate-600 hover:bg-slate-700 text-white px-3 py-1.5 text-xs transition disabled:opacity-50">Cancel</button>
+                <button onClick={() => { const all = expandDateRange(l.startDate?.slice(0, 10) ?? '', l.endDate?.slice(0, 10) ?? ''); setCancelSelected(new Set(all)); setCancelModal({ id: l.id, type: l.type, startDate: l.startDate?.slice(0, 10) ?? '', endDate: l.endDate?.slice(0, 10) ?? '', dates: all }); }} disabled={cancelLeave.isPending} className="rounded-lg bg-slate-600 hover:bg-slate-700 text-white px-3 py-1.5 text-xs transition disabled:opacity-50">Cancel</button>
               )}
             </>
           )}
@@ -449,6 +462,61 @@ export default function LeavesPage() {
             </div>
             <button onClick={() => { if (rejectModal) reviewLeave.mutate({ id: rejectModal.id, status: 'rejected', reviewComment: rejectReason.trim() }, { onSuccess: () => { setRejectModal(null); setRejectReason(''); } }); }} disabled={!rejectReason.trim() || reviewLeave.isPending} className="w-full rounded-xl bg-rose-600 hover:bg-rose-700 text-white py-2.5 text-sm font-semibold transition disabled:opacity-50 flex items-center justify-center gap-2">{reviewLeave.isPending && <Loader2 className="h-4 w-4 animate-spin" />}Reject Leave</button>
           </div>
+        </Modal>
+
+        {/* Cancel selected days (partial) */}
+        <Modal open={!!cancelModal} onClose={() => setCancelModal(null)} title="Cancel leave days">
+          {cancelModal && (
+            <div className="space-y-4">
+              <p className="text-sm text-slate-300">
+                Select the days to cancel for <span className="font-semibold capitalize">{cancelModal.type.replace('_', ' ')}</span> leave
+                ({cancelModal.startDate} → {cancelModal.endDate}).
+                Cancelled days become available for check-in; unselected days remain on leave.
+              </p>
+              <div className="rounded-xl border border-slate-800 bg-slate-800/40 divide-y divide-slate-800 max-h-64 overflow-y-auto">
+                {cancelModal.dates.map((d) => {
+                  const selected = cancelSelected.has(d);
+                  return (
+                    <label key={d} className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-slate-800/60 transition">
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => {
+                          setCancelSelected((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(d)) next.delete(d); else next.add(d);
+                            return next;
+                          });
+                        }}
+                        className="h-4 w-4 accent-violet-600"
+                      />
+                      <span className="text-sm text-slate-200 font-mono">{d}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <span>{cancelSelected.size} of {cancelModal.dates.length} day(s) selected</span>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setCancelSelected(new Set(cancelModal.dates))} className="text-violet-400 hover:text-violet-300">Select all</button>
+                  <button type="button" onClick={() => setCancelSelected(new Set())} className="text-slate-500 hover:text-white">Clear</button>
+                </div>
+              </div>
+              {error && <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm rounded-xl px-4 py-3">{error}</div>}
+              <button
+                onClick={() => {
+                  const dates = Array.from(cancelSelected).sort();
+                  if (dates.length === 0) return;
+                  cancelLeave.mutate({ id: cancelModal.id, cancelledDates: dates });
+                }}
+                disabled={cancelSelected.size === 0 || cancelLeave.isPending}
+                className="w-full rounded-xl bg-rose-600 hover:bg-rose-700 text-white py-2.5 text-sm font-semibold transition disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {cancelLeave.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                {cancelSelected.size === cancelModal.dates.length ? 'Cancel all days' : `Cancel ${cancelSelected.size} day(s)`}
+              </button>
+            </div>
+          )}
         </Modal>
 
         <ExportDialog
