@@ -52,7 +52,7 @@ export default function AppRoutes() {
       <Route path="/employee-database" element={<RequireRole roles={['director', 'hr']}>{withSuspense(<EmployeeDatabase />)}</RequireRole>} />
       <Route path="/team" element={withSuspense(<Team />)} />
       <Route path="/holidays" element={withSuspense(<Holidays />)} />
-      <Route path="/departments" element={<RequireRole roles={['director', 'hr']}>{withSuspense(<Departments />)}</RequireRole>} />
+      <Route path="/departments" element={withSuspense(<Departments />)} />
       <Route path="/roles" element={<RequireRole roles={['director', 'hr']}>{withSuspense(<Roles />)}</RequireRole>} />
       <Route path="/users" element={<RequireRole roles={['director']}>{withSuspense(<Users />)}</RequireRole>} />
       <Route path="/analytics" element={<RequireRole roles={['director', 'hr']}>{withSuspense(<Analytics />, <AnalyticsLoading />)}</RequireRole>} />

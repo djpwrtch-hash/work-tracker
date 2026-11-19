@@ -106,7 +106,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { name: 'Employee Database', href: '/employee-database', icon: Database, show: isAdminOrHr },
     { name: 'Team', href: '/team', icon: Users, show: true },
     { name: 'Holidays', href: '/holidays', icon: Sun, show: isAdminOrHr },
-    { name: 'Departments', href: '/departments', icon: Building2, show: isAdminOrHr },
+    { name: 'Departments', href: '/departments', icon: Building2, show: true },
     { name: 'Roles', href: '/roles', icon: ShieldCheck, show: isAdminOrHr },
     { name: 'Users', href: '/users', icon: UserCog, show: isAdmin },
     { name: 'Analytics', href: '/analytics', icon: BarChart3, show: isAdminOrHr },

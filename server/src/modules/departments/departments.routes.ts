@@ -12,7 +12,7 @@ const router = Router();
 
 router.use(authenticate);
 
-router.get('/', requireRole('director', 'hr'), apiCache({ ttl: 300_000 }), async (_req: Request, res: Response, next) => {
+router.get('/', apiCache({ ttl: 300_000 }), async (_req: Request, res: Response, next) => {
   try {
     const depts = await DepartmentsService.list();
     res.json(depts);
@@ -26,7 +26,7 @@ router.get('/stats', requireRole('director', 'hr'), apiCache({ ttl: 300_000 }), 
   } catch (err) { next(err); }
 });
 
-router.get('/:id', requireRole('director', 'hr'), requireUuid('id'), apiCache({ ttl: 300_000 }), async (req: Request, res: Response, next) => {
+router.get('/:id', requireUuid('id'), apiCache({ ttl: 300_000 }), async (req: Request, res: Response, next) => {
   try {
     const dept = await DepartmentsService.getById(req.params.id!);
     res.json(dept);

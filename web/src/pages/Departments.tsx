@@ -17,9 +17,10 @@ export default function DepartmentsPage() {
   const { confirm } = useConfirm();
   const { user, loading } = useAuth();
   const qc = useQueryClient();
-  const { data } = useQuery({ queryKey: ['departments'], queryFn: async () => (await api.get('/departments')).data });
+  const isAdmin = user?.accessLevel === 'director' || user?.accessLevel === 'hr';
+  const { data } = useQuery({ queryKey: ['departments'], queryFn: async () => (await api.get('/departments')).data, enabled: !loading && !!user });
   const departments = data?.departments ?? data ?? [];
-  const { data: users } = useQuery({ queryKey: ['usersList', 100], queryFn: async () => (await api.get('/users?limit=100')).data, enabled: !loading && !!user });
+  const { data: users } = useQuery({ queryKey: ['usersList', 100], queryFn: async () => (await api.get('/users?limit=100')).data, enabled: !loading && !!user && isAdmin });
   const allUsers: any[] = users?.users ?? [];
   const deptColumns = useMemo<Column<any>[]>(() => [
     { header: 'Name', key: 'name', render: (d: any) => <span className="text-white font-medium">{d.name}</span> },
@@ -100,16 +101,6 @@ export default function DepartmentsPage() {
   });
 
   if (loading) return <DashboardLayout><div className="flex items-center justify-center py-16"><div className="h-8 w-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" /></div></DashboardLayout>;
-  if (!user || (user.accessLevel !== 'director' && user.accessLevel !== 'hr')) {
-    return (
-      <DashboardLayout>
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <p className="text-sm text-slate-400 font-medium">Access Denied</p>
-          <p className="text-xs text-slate-600 mt-1">You need director or HR permissions to access this page.</p>
-        </div>
-      </DashboardLayout>
-    );
-  }
 
   return (
     <DashboardLayout>
@@ -117,10 +108,12 @@ export default function DepartmentsPage() {
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-white">Departments</h1>
           <div className="flex gap-2">
-            {departments.length > 0 && (
+            {isAdmin && departments.length > 0 && (
               <button onClick={() => setShowExport(true)} className="flex items-center gap-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2.5 text-sm font-medium transition border border-slate-700"><Download className="h-4 w-4" />Export</button>
             )}
-            <button onClick={() => { setShowCreate(true); setForm({ name: '', memberIds: [] }); setEditId(null); }} className="flex items-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white px-4 py-2.5 text-sm font-semibold transition"><Plus className="h-4 w-4" />New Department</button>
+            {isAdmin && (
+              <button onClick={() => { setShowCreate(true); setForm({ name: '', memberIds: [] }); setEditId(null); }} className="flex items-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white px-4 py-2.5 text-sm font-semibold transition"><Plus className="h-4 w-4" />New Department</button>
+            )}
           </div>
         </div>
 
@@ -129,12 +122,12 @@ export default function DepartmentsPage() {
           data={departments}
           rowKey={(d: any) => d.id}
           empty={<p className="text-sm text-slate-500">No departments</p>}
-          actions={(d: any) => (
+          actions={isAdmin ? ((d: any) => (
             <>
               <button onClick={async () => { setEditId(d.id); setForm({ name: d.name, memberIds: (d.members ?? []).map((m: any) => m.userId) }); setShowCreate(true); }} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition"><Pencil className="h-4 w-4" /></button>
               <button onClick={async () => { if (await confirm({ title: 'Delete Department', message: 'This will permanently remove this department. Continue?', variant: 'danger', confirmText: 'Delete' })) deleteDept.mutate(d.id); }} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-rose-400 transition"><Trash2 className="h-4 w-4" /></button>
             </>
-          )}
+          )) : undefined}
         />
 
         <ExportDialog
