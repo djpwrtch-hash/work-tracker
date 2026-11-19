@@ -747,6 +747,21 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       await addColumnIfMissing('leaves', 'cancelled_dates', "cancelled_dates JSON NULL");
     },
   },
+  {
+    version: 37,
+    name: 'department-members',
+    up: async () => {
+      await db.exec(`CREATE TABLE IF NOT EXISTS department_members (
+        department_id VARCHAR(36) NOT NULL,
+        user_id VARCHAR(36) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (department_id, user_id),
+        FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )`);
+      await db.exec(`INSERT IGNORE INTO department_members (department_id, user_id) SELECT department_id, id FROM users WHERE department_id IS NOT NULL`);
+    },
+  },
 ];
 
 await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
