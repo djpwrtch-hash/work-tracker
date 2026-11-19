@@ -594,6 +594,7 @@ export function exportAllDataToCSV(allData: ExportAllData, filename: string) {
 }
 
 export function displayRole(role: string) {
+  if (!role) return 'Employee';
   if (role === 'director') return 'DIRECTOR';
   return role === 'hr' ? 'HR' : role.charAt(0).toUpperCase() + role.slice(1);
 }

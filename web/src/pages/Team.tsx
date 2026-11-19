@@ -18,7 +18,7 @@ export default function TeamPage() {
   const { confirm } = useConfirm();
   const { user, loading } = useAuth();
   const qc = useQueryClient();
-  const isAdmin = user?.accessLevel === 'director' || user?.accessLevel === 'hr';
+  const isAdmin = user?.accessLevel === 'director' || user?.accessLevel === 'hr' || user?.role === 'director' || user?.role === 'hr';
   const [showCreate, setShowCreate] = useState(false);
   const [showManage, setShowManage] = useState<string | null>(null);
   const [showTasks, setShowTasks] = useState<string | null>(null);
@@ -235,16 +235,15 @@ export default function TeamPage() {
               ))}
             </div>
           </div>
-          {form.memberIds.length > 0 && (
-            <div><label className="block text-sm text-slate-300 mb-1">Team Leader (optional)</label>
-              <select value={form.leaderId || ''} onChange={(e) => setForm({ ...form, leaderId: e.target.value || undefined })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white">
-                <option value="">— No leader —</option>
-                {users?.users?.filter((u: any) => form.memberIds.includes(u.id)).map((u: any) => (
-                  <option key={u.id} value={u.id}>{u.firstName} {u.lastName} ({displayRole(u.role)})</option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div><label className="block text-sm text-slate-300 mb-1">Team Leader (optional)</label>
+            <select value={form.leaderId || ''} onChange={(e) => setForm({ ...form, leaderId: e.target.value || undefined })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white">
+              <option value="">— No leader —</option>
+              {(form.memberIds.length > 0 ? users?.users?.filter((u: any) => form.memberIds.includes(u.id)) : users?.users)?.map((u: any) => (
+                <option key={u.id} value={u.id}>{u.firstName} {u.lastName} ({displayRole(u.role)})</option>
+              ))}
+            </select>
+            <p className="mt-1.5 text-[11px] text-slate-500">{form.memberIds.length === 0 ? 'Select members to narrow the leader list, or pick anyone as leader.' : 'Leader list shows the selected members.'}</p>
+          </div>
           <button onClick={() => createTeam.mutate(form)} disabled={!form.teamName || form.memberIds.length === 0 || createTeam.isPending} className="w-full rounded-xl bg-violet-600 hover:bg-violet-700 text-white py-2.5 text-sm font-semibold transition disabled:opacity-50 flex items-center justify-center gap-2">
             {createTeam.isPending && <Loader2 className="h-4 w-4 animate-spin" />}Create Team
           </button>
