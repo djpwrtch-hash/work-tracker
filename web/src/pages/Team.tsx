@@ -2,9 +2,10 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, getApiError } from '@/lib/api';
-import { statusColor, displayRole } from '@/lib/utils';
-import { useState } from 'react';
-import { Users, Plus, Loader2, UserMinus, UserPlus, Trash2, Briefcase, Clock, CheckCircle2, Download } from 'lucide-react';
+import { listenOnSocket } from '@/lib/socket';
+import { statusColor, displayRole, formatDateTime } from '@/lib/utils';
+import { useState, useEffect, useRef } from 'react';
+import { Users, Plus, Loader2, UserMinus, UserPlus, Trash2, Briefcase, Clock, CheckCircle2, Download, MessageSquare, Send } from 'lucide-react';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { toast } from 'sonner';
 import { dynamic } from '@/lib/dynamic';
@@ -23,9 +24,11 @@ export default function TeamPage() {
   const [showTasks, setShowTasks] = useState<string | null>(null);
   const [showDashboard, setShowDashboard] = useState<string | null>(null);
   const [form, setForm] = useState({ teamName: '', memberIds: [] as string[], leaderId: undefined as string | undefined });
-  const [taskForm, setTaskForm] = useState({ title: '', description: '', priority: 'medium', dueDate: '', estimatedHours: '' });
+  const [taskForm, setTaskForm] = useState({ title: '', description: '', priority: 'medium', dueDate: '', estimatedHours: '', assigneeIds: [] as string[] });
   const [error, setError] = useState('');
   const [showExport, setShowExport] = useState(false);
+  const [showComments, setShowComments] = useState<string | null>(null);
+  const [commentText, setCommentText] = useState('');
 
   const exportColumns: ExportColumn[] = [
     { id: 'teamName', label: 'Team Name' },
@@ -44,6 +47,33 @@ export default function TeamPage() {
     queryKey: ['teamTasks', showTasks],
     queryFn: async () => (await api.get('/tasks', { params: { assigneeIds: teamForTasks?.members?.map((m: any) => m.userId) } })).data,
     enabled: !loading && !!user && !!showTasks && !!teamForTasks,
+  });
+
+  const { data: comments } = useQuery({
+    queryKey: ['teamTaskComments', showComments],
+    queryFn: async () => (await api.get(`/tasks/${showComments}/comments`)).data,
+    enabled: !loading && !!user && !!showComments,
+  });
+
+  useEffect(() => {
+    if (!showComments) return;
+    const handler = (payload: any) => {
+      if (!payload || payload.taskId !== showComments) return;
+      qc.invalidateQueries({ queryKey: ['teamTaskComments', showComments] });
+    };
+    const unsub = listenOnSocket({ 'task:comment': handler });
+    return unsub;
+  }, [showComments, qc]);
+
+  const commentsEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    commentsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [comments?.comments?.length]);
+
+  const addComment = useMutation({
+    mutationFn: async (taskId: string) => (await api.post(`/tasks/${taskId}/comments`, { message: commentText })).data,
+    onSuccess: () => { setCommentText(''); qc.invalidateQueries({ queryKey: ['teamTaskComments', showComments] }); },
+    onError: (e) => toast.error(getApiError(e, 'Failed to add comment')),
   });
 
   const teamForDashboard = showDashboard ? data?.find((t: any) => t.teamName === showDashboard) : null;
@@ -115,14 +145,13 @@ export default function TeamPage() {
 
   const createTeamTask = useMutation({
     mutationFn: async (teamName: string) => {
-      const team = data?.find((t: any) => t.teamName === teamName);
-      const assigneeIds = team?.members?.map((m: any) => m.userId) || [];
+      const assigneeIds = taskForm.assigneeIds.length > 0 ? taskForm.assigneeIds : (data?.find((t: any) => t.teamName === teamName)?.members?.map((m: any) => m.userId) || []);
       const payload: any = { title: taskForm.title, description: taskForm.description, priority: taskForm.priority, assigneeIds };
       if (taskForm.dueDate) payload.dueDate = new Date(taskForm.dueDate).toISOString();
       if (taskForm.estimatedHours) payload.estimatedHours = Number(taskForm.estimatedHours);
       return (await api.post('/tasks', payload)).data;
     },
-    onSuccess: () => { toast.success('Task created successfully'); qc.invalidateQueries({ queryKey: ['teamTasks'] }); setShowTasks(null); setTaskForm({ title: '', description: '', priority: 'medium', dueDate: '', estimatedHours: '' }); setError(''); },
+    onSuccess: () => { toast.success('Task created successfully'); qc.invalidateQueries({ queryKey: ['teamTasks'] }); setShowTasks(null); setTaskForm({ title: '', description: '', priority: 'medium', dueDate: '', estimatedHours: '', assigneeIds: [] }); setError(''); },
     onError: (e) => { toast.error('Failed to create task'); setError(getApiError(e, 'Failed to create task')); },
   });
 
@@ -168,7 +197,7 @@ export default function TeamPage() {
                 {isAdmin && (
                   <div className="flex flex-wrap gap-1.5 mb-4 pb-4 border-b border-slate-800">
                     <button onClick={() => setShowManage(team.teamName)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-xs font-medium" aria-label="Manage Members"><UserPlus className="h-3.5 w-3.5" />Members</button>
-                    <button onClick={() => setShowTasks(team.teamName)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-xs font-medium" aria-label="Team Tasks"><Briefcase className="h-3.5 w-3.5" />Tasks</button>
+                    <button onClick={() => { setShowTasks(team.teamName); setTaskForm((f) => ({ ...f, assigneeIds: (team.members ?? []).map((m: any) => m.userId) })); }} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-xs font-medium" aria-label="Team Tasks"><Briefcase className="h-3.5 w-3.5" />Tasks</button>
                     <button onClick={() => setShowDashboard(team.teamName)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-xs font-medium" aria-label="Team Dashboard"><Clock className="h-3.5 w-3.5" />Dashboard</button>
                     <button onClick={async () => { if (await confirm({ title: 'Delete Team', message: 'This will permanently remove this team and all its members. Continue?', variant: 'danger', confirmText: 'Delete' })) deleteTeam.mutate(team.teamName); }} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition text-xs font-medium" aria-label="Delete Team"><Trash2 className="h-3.5 w-3.5" />Delete</button>
                   </div>
@@ -260,7 +289,31 @@ export default function TeamPage() {
           <div className="flex flex-col sm:flex-row gap-2">
             <select value={taskForm.priority} onChange={(e) => setTaskForm({ ...taskForm, priority: e.target.value })} className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select>
             <input type="date" value={taskForm.dueDate} onChange={(e) => setTaskForm({ ...taskForm, dueDate: e.target.value })} className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white" />
-            <button onClick={() => showTasks && createTeamTask.mutate(showTasks)} disabled={!taskForm.title || createTeamTask.isPending} className="rounded-lg bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 text-sm font-semibold transition disabled:opacity-50">{createTeamTask.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create'}</button>
+            <button onClick={() => showTasks && createTeamTask.mutate(showTasks)} disabled={!taskForm.title || taskForm.assigneeIds.length === 0 || createTeamTask.isPending} className="rounded-lg bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 text-sm font-semibold transition disabled:opacity-50">{createTeamTask.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Create'}</button>
+          </div>
+          {/* Assignee picker — team members only */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs text-slate-400">Assign to</label>
+              <div className="flex gap-2 text-[11px]">
+                <button type="button" onClick={() => setTaskForm({ ...taskForm, assigneeIds: (teamForTasks?.members ?? []).map((m: any) => m.userId) })} className="text-violet-400 hover:text-violet-300">Select all</button>
+                <button type="button" onClick={() => setTaskForm({ ...taskForm, assigneeIds: [] })} className="text-slate-500 hover:text-white">Clear</button>
+              </div>
+            </div>
+            <div className="space-y-1 max-h-32 overflow-y-auto border border-slate-700 rounded-lg p-2 bg-slate-900">
+              {(teamForTasks?.members ?? []).length === 0 ? (
+                <p className="px-2 py-2 text-center text-[11px] text-slate-500">No members in this team</p>
+              ) : (teamForTasks?.members ?? []).map((m: any) => {
+                const checked = taskForm.assigneeIds.includes(m.userId);
+                return (
+                  <label key={m.userId} className="flex items-center gap-2 p-1.5 rounded hover:bg-slate-800 cursor-pointer">
+                    <input type="checkbox" checked={checked} onChange={(e) => setTaskForm({ ...taskForm, assigneeIds: e.target.checked ? [...taskForm.assigneeIds, m.userId] : taskForm.assigneeIds.filter((id) => id !== m.userId) })} className="rounded" />
+                    <span className="text-xs text-white">{m.firstName} {m.lastName}</span>
+                    <span className="text-[10px] text-slate-500">{m.employeeId}</span>
+                  </label>
+                );
+              })}
+            </div>
           </div>
         </div>
         <div className="space-y-3 max-h-60 overflow-y-auto">
@@ -269,9 +322,12 @@ export default function TeamPage() {
           ) : (
             teamTasks?.tasks?.map((task: any) => (
               <div key={task.id} className="bg-slate-800 rounded-xl p-4">
-                <div className="flex items-start justify-between mb-2">
+                <div className="flex items-start justify-between gap-2 mb-2">
                   <h3 className="font-medium text-white">{task.title}</h3>
-                  <span className={`inline-flex px-2 py-0.5 rounded-lg text-xs font-medium border ${statusColor(task.priority)}`}>{task.priority}</span>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setShowComments(task.id)} aria-label="Discuss task" title="Discuss task" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-700 hover:text-violet-300 transition"><MessageSquare className="h-4 w-4" /></button>
+                    <span className={`inline-flex px-2 py-0.5 rounded-lg text-xs font-medium border ${statusColor(task.priority)}`}>{task.priority}</span>
+                  </div>
                 </div>
                 {task.description && <p className="text-sm text-slate-400 mb-2">{task.description}</p>}
                 <div className="flex items-center gap-4 text-xs text-slate-500 flex-wrap">
@@ -293,6 +349,34 @@ export default function TeamPage() {
         filename="teams"
         title="Teams Export"
       />
+
+      <Modal open={!!showComments} onClose={() => setShowComments(null)} title="Task Discussion">
+        <div className="space-y-3">
+          <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+            {comments?.comments?.length === 0 ? (
+              <p className="text-center text-slate-500 py-6">No messages yet</p>
+            ) : (
+              comments?.comments?.map((c: any) => {
+                const mine = c.authorId === user?.id;
+                return (
+                  <div key={c.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm shadow ${mine ? 'rounded-br-md bg-violet-600 text-white' : 'rounded-bl-md bg-slate-800 text-slate-100'}`}>
+                      {!mine && <p className="text-[10px] font-semibold text-violet-300 mb-0.5">{c.firstName} {c.lastName}</p>}
+                      <p className="whitespace-pre-wrap break-words">{c.message}</p>
+                      <span className={`mt-1 block text-[10px] ${mine ? 'text-violet-200' : 'text-slate-500'}`}>{formatDateTime(c.createdAt)}</span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+            <div ref={commentsEndRef} />
+          </div>
+          <form onSubmit={(e) => { e.preventDefault(); if (showComments && commentText.trim()) addComment.mutate(showComments); }} className="flex gap-2">
+            <input value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Message..." className="flex-1 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2.5 text-sm text-white" />
+            <button type="submit" disabled={!commentText.trim() || addComment.isPending} aria-label="Send" className="flex items-center justify-center rounded-xl bg-violet-600 hover:bg-violet-700 text-white w-11 transition disabled:opacity-50">{addComment.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}</button>
+          </form>
+        </div>
+      </Modal>
 
       <Modal open={!!showDashboard} onClose={() => setShowDashboard(null)} maxWidth="max-w-3xl" title={showDashboard ? `${showDashboard} Dashboard` : ''}>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
