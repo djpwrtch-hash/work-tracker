@@ -24,7 +24,20 @@ function mapComment(c: any) {
 }
 
 export class TasksService {
-  static async create(createdById: string, input: any) {
+  static async create(createdById: string, input: any, accessLevel = 'director') {
+    // Employees may only assign tasks to members of teams they belong to.
+    if (accessLevel === 'employee') {
+      if (!Array.isArray(input.assigneeIds) || input.assigneeIds.length === 0) {
+        throw new AppError(400, 'Employees must assign the task to at least one team member');
+      }
+      const placeholders = input.assigneeIds.map(() => '?').join(',');
+      const memberRows = await db.prepare(`SELECT DISTINCT user_id FROM team_members WHERE team_name IN (SELECT team_name FROM team_members WHERE user_id = ?) AND user_id IN (${placeholders})`).all(createdById, ...input.assigneeIds) as any[];
+      const allowed = new Set(memberRows.map((r: any) => r.user_id));
+      const invalid = input.assigneeIds.filter((uid: string) => !allowed.has(uid));
+      if (invalid.length > 0) {
+        throw new AppError(403, 'You can only assign tasks to members of your own team');
+      }
+    }
     return await db.transaction(async () => {
       const id = uuid();
       await db.prepare(`INSERT INTO tasks (id, title, description, priority, due_date, created_by_id, department_id, estimated_hours) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)

@@ -42,9 +42,9 @@ router.get('/:id', requireUuid('id'), async (req: Request, res: Response, next) 
   } catch (err) { next(err); }
 });
 
-router.post('/', requireRole('director', 'hr'), validate(createTaskSchema), async (req: Request, res: Response, next) => {
+router.post('/', validate(createTaskSchema), async (req: Request, res: Response, next) => {
   try {
-    const task = await TasksService.create(req.user!.sub, req.body);
+    const task = await TasksService.create(req.user!.sub, req.body, req.user!.accessLevel);
     try { await ActivityLogsService.createDiff(req.user!.sub, 'create_task', 'task', task.id, `Created task: ${task.title ?? req.body.title ?? ''}`); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     res.status(201).json(task);
   } catch (err) { next(err); }
