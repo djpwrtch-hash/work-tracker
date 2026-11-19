@@ -84,6 +84,21 @@ export default function TasksPage() {
     enabled: !loading && !!user && isAdmin,
   });
 
+  const { data: teams } = useQuery({
+    queryKey: ['teamsList'],
+    queryFn: async () => (await api.get('/teams')).data,
+    enabled: !loading && !!user && isAdmin,
+  });
+
+  const [selectedTeam, setSelectedTeam] = useState<string>('');
+  const candidateUsers = useMemo(() => {
+    const all: any[] = users?.users ?? [];
+    if (!selectedTeam) return all;
+    const team = teams?.teams?.find((t: any) => t.teamName === selectedTeam);
+    const memberIds = new Set((team?.members ?? []).map((m: any) => m.userId));
+    return all.filter((u: any) => memberIds.has(u.id));
+  }, [selectedTeam, teams, users]);
+
   const { data: comments } = useQuery({
     queryKey: ['taskComments', showComments],
     queryFn: async () => (await api.get(`/tasks/${showComments}/comments`)).data,
@@ -277,9 +292,21 @@ export default function TasksPage() {
               <div><label className="block text-sm text-slate-300 mb-1">Priority</label><select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select></div>
               <div><label className="block text-sm text-slate-300 mb-1">Due Date</label><input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white" /></div>
             </div>
+            <div><label className="block text-sm text-slate-300 mb-1">Team (optional)</label>
+              <div className="flex items-center gap-2">
+                <select value={selectedTeam} onChange={(e) => { setSelectedTeam(e.target.value); setForm({ ...form, assigneeIds: [] }); }} className="flex-1 rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white">
+                  <option value="">All users ({users?.users?.length ?? 0})</option>
+                  {(teams?.teams ?? []).map((t: any) => <option key={t.teamName} value={t.teamName}>{t.teamName} ({t.memberCount ?? t.members?.length ?? 0} members)</option>)}
+                </select>
+                {selectedTeam && <button type="button" onClick={() => { setSelectedTeam(''); setForm({ ...form, assigneeIds: [] }); }} className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded-lg border border-slate-700">Clear</button>}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1">Choose a team to narrow down the assignee list, or leave as “All users”.</p>
+            </div>
             <div><label className="block text-sm text-slate-300 mb-1">Assignees *</label>
               <div className="space-y-1 max-h-40 overflow-y-auto border border-slate-700 rounded-xl p-2">
-                {users?.users?.map((u: any) => (
+                {candidateUsers.length === 0 ? (
+                  <p className="px-2 py-3 text-center text-xs text-slate-500">No members in this team yet.</p>
+                ) : candidateUsers.map((u: any) => (
                   <label key={u.id} className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-800 cursor-pointer">
                     <input type="checkbox" checked={form.assigneeIds.includes(u.id)} onChange={(e) => {
                       setForm({ ...form, assigneeIds: e.target.checked ? [...form.assigneeIds, u.id] : form.assigneeIds.filter((id) => id !== u.id) });
