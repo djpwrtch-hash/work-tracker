@@ -171,12 +171,6 @@ export default function TasksPage() {
     onSettled: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); qc.invalidateQueries({ queryKey: ['taskStats'] }); qc.invalidateQueries({ queryKey: ['employeeProgress'] }); },
   });
 
-  const updateActualHours = useMutation({
-    mutationFn: async ({ id, actualHours }: { id: string; actualHours: number }) => (await api.patch(`/tasks/${id}`, { actualHours })).data,
-    onError: (e) => setError(getApiError(e, 'Failed to update hours')),
-    onSettled: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); qc.invalidateQueries({ queryKey: ['taskStats'] }); },
-  });
-
   const taskColumns = useMemo<Column<any>[]>(() => [
     { header: 'Task', key: 'task', render: (t: any) => <><p className="text-white font-medium">{t.title}</p>{t.description && <p className="text-xs text-slate-500 truncate max-w-[300px]">{t.description}</p>}</> },
     { header: 'Priority', key: 'priority', render: (t: any) => <Badge className={statusColor(t.priority)}>{t.priority}</Badge> },
@@ -197,13 +191,7 @@ export default function TasksPage() {
         <span className="text-xs text-slate-400">%</span>
       </div>
     ) },
-    { header: 'Time (hrs)', key: 'time', render: (t: any) => (
-      <input type="number" min={0} step={0.5} defaultValue={t.actualHours ?? ''}
-        onBlur={(e) => { const v = Number(e.target.value); if (v !== (t.actualHours ?? 0)) updateActualHours.mutate({ id: t.id, actualHours: v }); }}
-        placeholder="hrs"
-        className="w-16 rounded-lg border border-slate-700 bg-slate-800 px-1.5 py-1 text-xs text-white" />
-    ) },
-  ], [updateStatus, updateProgress, updateActualHours]);
+  ], [updateStatus, updateProgress]);
 
   const deleteTask = useMutation({
     mutationFn: async (id: string) => (await api.delete(`/tasks/${id}`)).data,
