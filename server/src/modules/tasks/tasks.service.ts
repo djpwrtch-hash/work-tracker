@@ -7,7 +7,7 @@ import { getIO } from '../../lib/socket.js';
 function mapTask(t: any) {
   return {
     id: t.id, title: t.title, description: t.description, priority: t.priority, status: t.status,
-    createdById: t.created_by_id, departmentId: t.department_id,
+    createdById: t.created_by_id, departmentId: t.department_id, teamName: t.team_name,
     progressPercent: t.progress_percent, dueDate: t.due_date,
     startedAt: t.started_at, completedAt: t.completed_at,
     estimatedHours: t.estimated_hours, actualHours: t.actual_hours,
@@ -38,15 +38,27 @@ export class TasksService {
         throw new AppError(403, 'You can only assign tasks to members of your own team');
       }
     }
+    if (input.teamName) {
+      const teamMembers = await db.prepare('SELECT user_id FROM team_members WHERE team_name = ?').all(input.teamName) as any[];
+      const teamMemberIds = new Set(teamMembers.map((r: any) => r.user_id));
+      if (teamMemberIds.size === 0) throw new AppError(404, 'Team not found');
+      if (accessLevel === 'employee' && !teamMemberIds.has(createdById)) {
+        throw new AppError(403, 'You are not a member of that team');
+      }
+      const notInTeam = input.assigneeIds.filter((uid: string) => !teamMemberIds.has(uid));
+      if (notInTeam.length > 0) {
+        throw new AppError(400, 'All assignees must be members of the selected team');
+      }
+    }
     return await db.transaction(async () => {
       const id = uuid();
-      await db.prepare(`INSERT INTO tasks (id, title, description, priority, due_date, created_by_id, department_id, estimated_hours) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(id, input.title, input.description ?? null, input.priority ?? 'medium', input.dueDate ? new Date(input.dueDate).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '') : null, createdById, input.departmentId ?? null, input.estimatedHours ?? null);
+      await db.prepare(`INSERT INTO tasks (id, title, description, priority, due_date, created_by_id, department_id, team_name, estimated_hours) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, input.title, input.description ?? null, input.priority ?? 'medium', input.dueDate ? new Date(input.dueDate).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '') : null, createdById, input.departmentId ?? null, input.teamName ?? null, input.estimatedHours ?? null);
       const taskPh = input.assigneeIds.map(() => '(?, ?)').join(', ');
       const tp: any[] = [];
       for (const uid of input.assigneeIds) { tp.push(id, uid); }
       await db.prepare(`INSERT INTO task_assignments (task_id, user_id) VALUES ${taskPh}`).run(...tp);
-      const task = await db.prepare('SELECT id, title, description, priority, status, created_by_id, department_id, progress_percent, due_date, started_at, completed_at, estimated_hours, actual_hours, created_at, updated_at FROM tasks WHERE id = ?').get(id) as any;
+      const task = await db.prepare('SELECT id, title, description, priority, status, created_by_id, department_id, team_name, progress_percent, due_date, started_at, completed_at, estimated_hours, actual_hours, created_at, updated_at FROM tasks WHERE id = ?').get(id) as any;
       const notifPh = input.assigneeIds.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ');
       const np: any[] = [];
       for (const uid of input.assigneeIds) {
@@ -66,7 +78,7 @@ export class TasksService {
   }
 
   static async list(input: any, userId: string, role: string) {
-    const { page = 1, limit = 20, status, statuses, priority, priorities, search, assigneeId, assigneeIds, departmentId, dueBefore, dueAfter } = input;
+    const { page = 1, limit = 20, status, statuses, priority, priorities, search, assigneeId, assigneeIds, departmentId, teamName, dueBefore, dueAfter } = input;
     const offset = (page - 1) * limit;
     const conds: string[] = []; const params: any[] = [];
 
@@ -87,6 +99,7 @@ export class TasksService {
       params.push(...priorities);
     }
     if (departmentId) { conds.push('t.department_id = ?'); params.push(departmentId); }
+    if (teamName) { conds.push('t.team_name = ?'); params.push(teamName); }
     if (search) { conds.push("t.title LIKE ? ESCAPE '\\\\'"); params.push(`%${search.replace(/[\\%_]/g, (c: string) => '\\' + c)}%`); }
     if (dueBefore) { conds.push('t.due_date < ?'); params.push(new Date(dueBefore).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '')); }
     if (dueAfter) { conds.push('t.due_date > ?'); params.push(new Date(dueAfter).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '')); }
@@ -105,7 +118,7 @@ export class TasksService {
     }
     const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
     const count = (await db.prepare(`SELECT count(*) as c FROM tasks t ${where}`).get(...params) as any).c;
-    const tasks = await db.prepare(`SELECT t.id, t.title, t.description, t.priority, t.status, t.created_by_id, t.department_id, t.progress_percent, t.due_date, t.started_at, t.completed_at, t.estimated_hours, t.actual_hours, t.created_at, t.updated_at FROM tasks t ${where} ORDER BY t.created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as any[];
+    const tasks = await db.prepare(`SELECT t.id, t.title, t.description, t.priority, t.status, t.created_by_id, t.department_id, t.team_name, t.progress_percent, t.due_date, t.started_at, t.completed_at, t.estimated_hours, t.actual_hours, t.created_at, t.updated_at FROM tasks t ${where} ORDER BY t.created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as any[];
     
     // Optimize: Batch fetch assignees instead of N+1 queries
     if (tasks.length === 0) return { tasks: [], total: count, page, limit };
@@ -128,7 +141,7 @@ export class TasksService {
   }
 
   static async getById(id: string, userId: string, role: string) {
-    const t = await db.prepare('SELECT id, title, description, priority, status, created_by_id, department_id, progress_percent, due_date, started_at, completed_at, estimated_hours, actual_hours, created_at, updated_at FROM tasks WHERE id = ?').get(id) as any;
+    const t = await db.prepare('SELECT id, title, description, priority, status, created_by_id, department_id, team_name, progress_percent, due_date, started_at, completed_at, estimated_hours, actual_hours, created_at, updated_at FROM tasks WHERE id = ?').get(id) as any;
     if (!t) throw new AppError(404, 'Task not found');
     if (role === 'employee') {
       const isAssignee = await db.prepare('SELECT 1 FROM task_assignments WHERE task_id = ? AND user_id = ?').get(id, userId);
@@ -184,6 +197,7 @@ export class TasksService {
       if (input.dueDate !== undefined) { sets.push('due_date = ?'); params.push(input.dueDate ? new Date(input.dueDate).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '') : null); }
       if (input.estimatedHours !== undefined) { sets.push('estimated_hours = ?'); params.push(input.estimatedHours); }
       if (input.actualHours !== undefined) { sets.push('actual_hours = ?'); params.push(input.actualHours); }
+      if (input.teamName !== undefined) { sets.push('team_name = ?'); params.push(input.teamName ?? null); }
       params.push(id);
       await db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`).run(...params);
       if (input.assigneeIds !== undefined) {
@@ -195,7 +209,7 @@ export class TasksService {
           await db.prepare(`INSERT INTO task_assignments (task_id, user_id) VALUES ${ph}`).run(...p);
         }
       }
-      return mapTask(await db.prepare('SELECT id, title, description, priority, status, created_by_id, department_id, progress_percent, due_date, started_at, completed_at, estimated_hours, actual_hours, created_at, updated_at FROM tasks WHERE id = ?').get(id));
+      return mapTask(await db.prepare('SELECT id, title, description, priority, status, created_by_id, department_id, team_name, progress_percent, due_date, started_at, completed_at, estimated_hours, actual_hours, created_at, updated_at FROM tasks WHERE id = ?').get(id));
     })();
   }
 

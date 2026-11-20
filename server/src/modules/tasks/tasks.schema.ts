@@ -10,6 +10,7 @@ export const createTaskSchema = z.object({
     { message: 'Duplicate assignees are not allowed' }
   ),
   departmentId: z.string().trim().min(1, 'Invalid department ID').optional(),
+  teamName: z.string().trim().min(1, 'Invalid team name').max(200, 'Team name too long').optional(),
   estimatedHours: z.number().min(0, 'Hours must be positive').max(1000, 'Hours too high').optional(),
 });
 
@@ -26,6 +27,7 @@ export const updateTaskSchema = z.object({
   ),
   estimatedHours: z.number().min(0, 'Hours must be positive').max(1000, 'Hours too high').optional(),
   actualHours: z.number().min(0, 'Hours must be positive').max(1000, 'Hours too high').optional(),
+  teamName: z.string().trim().min(1, 'Invalid team name').max(200, 'Team name too long').nullable().optional(),
 });
 
 export const listTasksSchema = z.object({
@@ -47,6 +49,7 @@ export const listTasksSchema = z.object({
     z.array(z.string().trim().min(1)).optional()
   ),
   departmentId: z.string().trim().min(1).optional(),
+  teamName: z.string().trim().min(1).max(200).optional(),
   search: z.string().trim().optional(),
   dueBefore: z.string().trim().optional(),
   dueAfter: z.string().trim().optional(),

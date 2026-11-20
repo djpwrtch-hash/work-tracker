@@ -19,6 +19,8 @@ export default function TeamPage() {
   const { user, loading } = useAuth();
   const qc = useQueryClient();
   const isAdmin = user?.accessLevel === 'director' || user?.accessLevel === 'hr' || user?.role === 'director' || user?.role === 'hr';
+  // Team editing (create/update/leader/members/delete) is director-only.
+  const isDirector = user?.accessLevel === 'director' || user?.role === 'director';
   const [showCreate, setShowCreate] = useState(false);
   const [showManage, setShowManage] = useState<string | null>(null);
   const [showTasks, setShowTasks] = useState<string | null>(null);
@@ -45,8 +47,8 @@ export default function TeamPage() {
   const teamForTasks = showTasks ? data?.find((t: any) => t.teamName === showTasks) : null;
   const { data: teamTasks } = useQuery({
     queryKey: ['teamTasks', showTasks],
-    queryFn: async () => (await api.get('/tasks', { params: { assigneeIds: teamForTasks?.members?.map((m: any) => m.userId), limit: 100 } })).data,
-    enabled: !loading && !!user && !!showTasks && !!teamForTasks,
+    queryFn: async () => (await api.get('/tasks', { params: { teamName: showTasks, limit: 100 } })).data,
+    enabled: !loading && !!user && !!showTasks,
   });
 
   const { data: comments } = useQuery({
@@ -77,11 +79,10 @@ export default function TeamPage() {
   });
 
   const teamForDashboard = showDashboard ? data?.find((t: any) => t.teamName === showDashboard) : null;
-  const dashboardMemberIds = teamForDashboard?.members?.map((m: any) => m.userId) || [];
   const { data: dashboardTasks } = useQuery({
-    queryKey: ['teamDashboardTasks', showDashboard, ...dashboardMemberIds],
-    queryFn: async () => (await api.get('/tasks', { params: { assigneeIds: dashboardMemberIds, limit: 100 } })).data,
-    enabled: !loading && !!user && !!showDashboard && dashboardMemberIds.length > 0,
+    queryKey: ['teamDashboardTasks', showDashboard],
+    queryFn: async () => (await api.get('/tasks', { params: { teamName: showDashboard, limit: 100 } })).data,
+    enabled: !loading && !!user && !!showDashboard,
   });
 
   const createTeam = useMutation({
@@ -91,7 +92,7 @@ export default function TeamPage() {
   });
 
   const addMembers = useMutation({
-    mutationFn: async ({ teamName, userIds }: { teamName: string; userIds: string[] }) => (await api.post(`/teams/${teamName}/members`, { userIds })).data,
+    mutationFn: async ({ teamName, userIds }: { teamName: string; userIds: string[] }) => (await api.post(`/teams/${encodeURIComponent(teamName)}/members`, { userIds })).data,
     onMutate: async ({ teamName, userIds }) => {
       await qc.cancelQueries({ queryKey: ['teams'] });
       const prev = qc.getQueryData(['teams']);
@@ -115,7 +116,7 @@ export default function TeamPage() {
   });
 
   const removeMembers = useMutation({
-    mutationFn: async ({ teamName, userIds }: { teamName: string; userIds: string[] }) => (await api.delete(`/teams/${teamName}/members`, { data: { userIds } })).data,
+    mutationFn: async ({ teamName, userIds }: { teamName: string; userIds: string[] }) => (await api.delete(`/teams/${encodeURIComponent(teamName)}/members`, { data: { userIds } })).data,
     onMutate: async ({ teamName, userIds }) => {
       await qc.cancelQueries({ queryKey: ['teams'] });
       const prev = qc.getQueryData(['teams']);
@@ -135,7 +136,7 @@ export default function TeamPage() {
   });
 
   const deleteTeam = useMutation({
-    mutationFn: async (teamName: string) => (await api.delete(`/teams/${teamName}`)).data,
+    mutationFn: async (teamName: string) => (await api.delete(`/teams/${encodeURIComponent(teamName)}`)).data,
     onSuccess: () => { toast.success('Team deleted successfully'); qc.invalidateQueries({ queryKey: ['teams'] }); },
     onError: () => toast.error('Failed to delete team'),
   });
@@ -143,13 +144,23 @@ export default function TeamPage() {
   const createTeamTask = useMutation({
     mutationFn: async (teamName: string) => {
       const assigneeIds = taskForm.assigneeIds.length > 0 ? taskForm.assigneeIds : (data?.find((t: any) => t.teamName === teamName)?.members?.map((m: any) => m.userId) || []);
-      const payload: any = { title: taskForm.title, description: taskForm.description, priority: taskForm.priority, assigneeIds };
+      const payload: any = { title: taskForm.title, description: taskForm.description, priority: taskForm.priority, assigneeIds, teamName };
       if (taskForm.dueDate) payload.dueDate = new Date(taskForm.dueDate).toISOString();
       if (taskForm.estimatedHours) payload.estimatedHours = Number(taskForm.estimatedHours);
       return (await api.post('/tasks', payload)).data;
     },
-    onSuccess: () => { toast.success('Task created successfully'); qc.invalidateQueries({ queryKey: ['teamTasks'] }); setShowTasks(null); setTaskForm({ title: '', description: '', priority: 'medium', dueDate: '', estimatedHours: '', assigneeIds: [] }); setError(''); },
+    onSuccess: () => { toast.success('Task created successfully'); qc.invalidateQueries({ queryKey: ['teamTasks'] }); qc.invalidateQueries({ queryKey: ['teamDashboardTasks'] }); setShowTasks(null); setTaskForm({ title: '', description: '', priority: 'medium', dueDate: '', estimatedHours: '', assigneeIds: [] }); setError(''); },
     onError: (e) => { toast.error('Failed to create task'); setError(getApiError(e, 'Failed to create task')); },
+  });
+
+  // Director-only: assign or change the team leader after the team was created.
+  const setLeader = useMutation({
+    mutationFn: async ({ teamName, leaderId }: { teamName: string; leaderId?: string }) => {
+      const members = data?.find((t: any) => t.teamName === teamName)?.members?.map((m: any) => m.userId) || [];
+      return (await api.put(`/teams/${encodeURIComponent(teamName)}`, { memberIds: members, leaderId })).data;
+    },
+    onSuccess: () => { toast.success('Team leader updated'); qc.invalidateQueries({ queryKey: ['teams'] }); },
+    onError: (e) => toast.error(getApiError(e, 'Failed to update team leader')),
   });
 
   const team = showManage ? data?.find((t: any) => t.teamName === showManage) : null;
@@ -167,9 +178,11 @@ export default function TeamPage() {
           {isAdmin && (
             <div className="flex gap-2">
               <button onClick={() => setShowExport(true)} className="flex items-center gap-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2.5 text-sm font-medium transition border border-slate-700"><Download className="h-4 w-4" />Export</button>
-              <button onClick={() => setShowCreate(true)} className="flex items-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white px-4 py-2.5 text-sm font-semibold transition">
-                <Plus className="h-4 w-4" />New Team
-              </button>
+              {isDirector && (
+                <button onClick={() => setShowCreate(true)} className="flex items-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white px-4 py-2.5 text-sm font-semibold transition">
+                  <Plus className="h-4 w-4" />New Team
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -195,7 +208,7 @@ export default function TeamPage() {
                 <div className="flex flex-wrap gap-1.5 mb-4 pb-4 border-b border-slate-800">
                   <button onClick={() => { setShowTasks(team.teamName); setTaskForm((f) => ({ ...f, assigneeIds: (team.members ?? []).map((m: any) => m.userId) })); }} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-xs font-medium" aria-label="Team Tasks"><Briefcase className="h-3.5 w-3.5" />Tasks</button>
                   <button onClick={() => setShowDashboard(team.teamName)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-xs font-medium" aria-label="Team Dashboard"><Clock className="h-3.5 w-3.5" />Dashboard</button>
-                  {isAdmin && (
+                  {isDirector && (
                     <>
                       <button onClick={() => setShowManage(team.teamName)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-xs font-medium" aria-label="Manage Members"><UserPlus className="h-3.5 w-3.5" />Members</button>
                       <button onClick={async () => { if (await confirm({ title: 'Delete Team', message: 'This will permanently remove this team and all its members. Continue?', variant: 'danger', confirmText: 'Delete' })) deleteTeam.mutate(team.teamName); }} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition text-xs font-medium" aria-label="Delete Team"><Trash2 className="h-3.5 w-3.5" />Delete</button>
@@ -264,6 +277,21 @@ export default function TeamPage() {
                   </div>
                 ))}
               </div>
+            </div>
+            <div>
+              <h3 className="text-sm font-medium text-slate-300 mb-2">Team Leader</h3>
+              <select
+                value={team.members.find((m: any) => m.memberRole === 'leader')?.userId ?? ''}
+                onChange={(e) => setLeader.mutate({ teamName: team.teamName, leaderId: e.target.value || undefined })}
+                disabled={setLeader.isPending}
+                className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white disabled:opacity-50"
+              >
+                <option value="">— No leader —</option>
+                {team.members.map((m: any) => (
+                  <option key={m.userId} value={m.userId}>{m.firstName} {m.lastName}</option>
+                ))}
+              </select>
+              <p className="mt-1.5 text-[11px] text-slate-500">Only the director can assign or change the team leader.</p>
             </div>
             <div>
               <h3 className="text-sm font-medium text-slate-300 mb-2">Add Members</h3>

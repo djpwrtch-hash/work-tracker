@@ -185,6 +185,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   completed_at DATETIME,
   created_by_id VARCHAR(36) NOT NULL,
   department_id VARCHAR(36),
+  team_name VARCHAR(100),
   estimated_hours DECIMAL(5,2),
   actual_hours DECIMAL(5,2),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

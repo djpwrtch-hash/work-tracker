@@ -3,10 +3,10 @@ import db from '../db/index.js';
 import { ensureAdminBootstrap } from '../db/bootstrap.js';
 
 describe('database migrations', () => {
-  it('applies all 37 migrations in order', async () => {
+  it('applies all 38 migrations in order', async () => {
     const rows = (await db.prepare('SELECT version FROM schema_migrations ORDER BY version').all()) as any[];
     const versions = rows.map((r) => Number(r.version));
-    expect(versions).toEqual(Array.from({ length: 37 }, (_, i) => i + 1));
+    expect(versions).toEqual(Array.from({ length: 38 }, (_, i) => i + 1));
   });
 
   it('creates all core tables', async () => {

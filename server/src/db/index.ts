@@ -762,6 +762,13 @@ const migrations: Array<{ version: number; name: string; up: () => Promise<void>
       await db.exec(`INSERT IGNORE INTO department_members (department_id, user_id) SELECT department_id, id FROM users WHERE department_id IS NOT NULL`);
     },
   },
+  {
+    version: 38,
+    name: 'team-name-on-tasks',
+    up: async () => {
+      await addColumnIfMissing('tasks', 'team_name', 'team_name VARCHAR(100) NULL');
+    },
+  },
 ];
 
 await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
