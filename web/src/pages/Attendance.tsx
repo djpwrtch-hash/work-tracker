@@ -166,6 +166,11 @@ function mapLink(lat: number, lng: number): string {
   return `https://www.google.com/maps?q=${lat},${lng}`;
 }
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** How long we wait for a fast GPS fix before checking in/out without it. */
+const LOCATION_GRACE_MS = 2500;
+
 /** Toast copy for a GPS-captured location — surfaces accuracy honestly. */
 function locationToastText(location: { accuracy: number }): string {
   if (location.accuracy > 5) {
@@ -241,16 +246,6 @@ export default function AttendancePage() {
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, []);
-
-  // Auto-retry location when the permission becomes available (e.g. after the user re-enables it in settings)
-  useEffect(() => {
-    if (permissionState !== 'granted' && permissionState !== 'prompt') return;
-    const current = today as any;
-    const effectiveLat = capturedLocation?.latitude ?? current?.latitude;
-    if (current && effectiveLat == null) {
-      void handleRetryLocation();
-    }
-  }, [permissionState]);
 
   useEffect(() => {
     const handler = () => {
@@ -770,9 +765,21 @@ export default function AttendancePage() {
       ? captureLocation({ windowMs: 20000, targetAccuracy: 5 })
       : Promise.resolve({ location: null, error: { code: 'PERMISSION_DENIED', message: 'Location capture is off for your account (director-controlled).' } });
     try {
-      const record = await checkOut.mutateAsync(null);
+      // Give GPS a short head start so a fast fix is saved atomically with check-out
+      // (avoids losing the location if the user leaves before the background PATCH runs).
+      const quick = await Promise.race([capturePromise, sleep(LOCATION_GRACE_MS)]);
+      const quickLoc = (quick as any)?.location ?? null;
+      const record = await checkOut.mutateAsync(quickLoc);
       toast.success('Checked out');
-      void attachLocation(record, capturePromise);
+      if (quickLoc && record?.latitude != null) {
+        setCapturedLocation({ latitude: Number(record.latitude), longitude: Number(record.longitude) });
+        toast.success(locationToastText(quickLoc));
+      } else if (quickLoc) {
+        // Backend dropped the coords (director disabled location) — don't show a stale fix.
+        setLocationError('Location capture is off for your account (director-controlled).');
+      } else {
+        void attachLocation(record, capturePromise);
+      }
     } catch {
       // mutation onError already showed the toast
       void 0;
@@ -786,9 +793,20 @@ export default function AttendancePage() {
       ? captureLocation({ windowMs: 20000, targetAccuracy: 5 })
       : Promise.resolve({ location: null, error: { code: 'PERMISSION_DENIED', message: 'Location capture is off for your account (director-controlled).' } });
     try {
-      const record = await checkIn.mutateAsync(null);
+      // Give GPS a short head start so a fast fix is saved atomically with check-in.
+      const quick = await Promise.race([capturePromise, sleep(LOCATION_GRACE_MS)]);
+      const quickLoc = (quick as any)?.location ?? null;
+      const record = await checkIn.mutateAsync(quickLoc);
       toast.success('Checked in');
-      void attachLocation(record, capturePromise);
+      if (quickLoc && record?.latitude != null) {
+        setCapturedLocation({ latitude: Number(record.latitude), longitude: Number(record.longitude) });
+        toast.success(locationToastText(quickLoc));
+      } else if (quickLoc) {
+        // Backend dropped the coords (director disabled location) — don't show a stale fix.
+        setLocationError('Location capture is off for your account (director-controlled).');
+      } else {
+        void attachLocation(record, capturePromise);
+      }
     } catch {
       void 0;
     }
@@ -829,10 +847,10 @@ export default function AttendancePage() {
     }
   };
 
-  const handleRetryLocation = async () => {
+  const handleRetryLocation = useCallback(async (opts?: { silent?: boolean }) => {
     const recId = (today as any)?.id;
-    if (!recId) { toast.error('No attendance record to attach location to'); return; }
-    if (!locationEnabled) { toast.error('Location capture is off for your account (director-controlled).'); return; }
+    if (!recId) { if (!opts?.silent) toast.error('No attendance record to attach location to'); return; }
+    if (!locationEnabled) { if (!opts?.silent) toast.error('Location capture is off for your account (director-controlled).'); return; }
     setLocationError(null);
     setGettingLocation(true);
     try {
@@ -857,18 +875,34 @@ export default function AttendancePage() {
           qc.setQueryData(['todayAtt'], (old: any) => (old ? { ...old, ...updated } : old));
         }
         void qc.invalidateQueries({ queryKey: ['todayEvents'] });
-        toast.success(locationToastText(result.location));
+        if (!opts?.silent) toast.success(locationToastText(result.location));
       } else if (result.error) {
         setLocationError(`${getLocationErrorMessage(result.error)} Location not saved.`);
-        toast.error(getLocationErrorMessage(result.error));
+        if (!opts?.silent) toast.error(getLocationErrorMessage(result.error));
       }
     } catch (e: any) {
-      toast.error(getApiError(e, 'Failed to save location'));
+      if (!opts?.silent) toast.error(getApiError(e, 'Failed to save location'));
     } finally {
       setGettingLocation(false);
-      void 0;
     }
-  };
+  }, [today, locationEnabled, qc]);
+
+  // Auto-attach location when the Attendance page loads (or permission is (re)granted) and
+  // today's record is missing coordinates. This recovers records whose background capture was
+  // abandoned because the employee left the page during the GPS window. Runs once per record.
+  const autoCaptureRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!locationEnabled) return;
+    const current = today as any;
+    if (!current?.id) return;
+    if ((capturedLocation?.latitude ?? current.latitude) != null) return;
+    if (permissionState === 'denied') return;
+    // Retry once per record per permission state, so granting permission later still triggers a capture.
+    const attemptKey = `${current.id}:${permissionState}`;
+    if (autoCaptureRef.current === attemptKey) return;
+    autoCaptureRef.current = attemptKey;
+    void handleRetryLocation({ silent: true });
+  }, [locationEnabled, today, capturedLocation, permissionState, handleRetryLocation]);
 
   const handleTestLocation = async () => {
     setTestResult('Testing… (this may take up to 20s outdoors)');

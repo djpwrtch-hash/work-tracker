@@ -12,14 +12,14 @@ router.use(authenticate);
 
 router.post('/check-in', validate(checkInSchema), async (req: Request, res: Response, next) => {
   try {
-    const record = await AttendanceService.checkIn(req.user!.sub, req.body);
+    const record = await AttendanceService.checkIn(req.user!.sub, req.body, req.ip);
     res.status(201).json(record);
   } catch (err) { next(err); }
 });
 
 router.post('/check-out', validate(locationOptionalSchema), async (req: Request, res: Response, next) => {
   try {
-    const record = await AttendanceService.checkOut(req.user!.sub, req.body);
+    const record = await AttendanceService.checkOut(req.user!.sub, req.body, req.ip);
     res.json(record);
   } catch (err) { next(err); }
 });
@@ -177,7 +177,7 @@ router.get('/', requireRole('director', 'hr'), validate(listAttendanceSchema, 'q
 
 router.patch('/:id', authenticate, requireUuid('id'), validate(updateAttendanceSchema), async (req: Request, res: Response, next) => {
   try {
-    const record = await AttendanceService.update(req.params.id!, req.body, req.user!.sub, req.user!.accessLevel);
+    const record = await AttendanceService.update(req.params.id!, req.body, req.user!.sub, req.user!.accessLevel, req.ip);
     res.json(record);
   } catch (err) { next(err); }
 });

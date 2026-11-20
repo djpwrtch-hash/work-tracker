@@ -125,7 +125,7 @@ export async function getPauseLog(startDate?: string, endDate?: string): Promise
 }
 
 export class AttendanceService {
-  static async checkIn(userId: string, input: { status?: string; notes?: string; latitude?: number; longitude?: number; accuracy?: number; locationCapturedAt?: string }) {
+  static async checkIn(userId: string, input: { status?: string; notes?: string; latitude?: number; longitude?: number; accuracy?: number; locationCapturedAt?: string }, ipAddress?: string) {
     const today = getISTDate();
 
     // Director may have disabled location capture for this user — silently drop any location data.
@@ -169,7 +169,7 @@ export class AttendanceService {
         }
         const rec = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(existing.id);
         logEvent(existing.id, userId, 'check_in', { latitude: input.latitude, longitude: input.longitude, accuracy: input.accuracy, locationCapturedAt: input.locationCapturedAt }, now);
-        try { await ActivityLogsService.createDiff(userId, 'check_in', 'attendance', existing.id, `Checked in${hasLocation ? ' with location' : ''}`); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
+        try { await ActivityLogsService.createDiff(userId, 'check_in', 'attendance', existing.id, `Checked in${hasLocation ? ' with location' : ''}`, ipAddress); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
         await invalidateAttendanceCache();
         emitAttendanceUpdated(userId, rec);
         return rec;
@@ -191,7 +191,7 @@ export class AttendanceService {
     }
     const rec = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(id);
     logEvent(id, userId, 'check_in', { latitude: input.latitude, longitude: input.longitude, accuracy: input.accuracy, locationCapturedAt: input.locationCapturedAt }, now);
-    try { await ActivityLogsService.createDiff(userId, 'check_in', 'attendance', id, `Checked in${hasLocation ? ' with location' : ''}`); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
+    try { await ActivityLogsService.createDiff(userId, 'check_in', 'attendance', id, `Checked in${hasLocation ? ' with location' : ''}`, ipAddress); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     await invalidateAttendanceCache();
     emitAttendanceUpdated(userId, rec);
     return rec;
@@ -254,7 +254,7 @@ export class AttendanceService {
     return updated;
   }
 
-  static async checkOut(userId: string, input?: { latitude?: number; longitude?: number; accuracy?: number; locationCapturedAt?: string }) {
+  static async checkOut(userId: string, input?: { latitude?: number; longitude?: number; accuracy?: number; locationCapturedAt?: string }, ipAddress?: string) {
     const realToday = getISTDate();
     let today = getISTDate();
 
@@ -345,7 +345,7 @@ export class AttendanceService {
           'approval', '/attendance');
       }
     }
-    try { await ActivityLogsService.createDiff(userId, 'check_out', 'attendance', rec.id, `Checked out${input?.latitude !== undefined || input?.longitude !== undefined ? ' with location' : ''}; worked ${Number(updated?.working_hours ?? 0)}h`); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
+    try { await ActivityLogsService.createDiff(userId, 'check_out', 'attendance', rec.id, `Checked out${input?.latitude !== undefined || input?.longitude !== undefined ? ' with location' : ''}; worked ${Number(updated?.working_hours ?? 0)}h`, ipAddress); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     await invalidateAttendanceCache();
     emitAttendanceUpdated(userId, updated);
     return updated;
@@ -648,7 +648,7 @@ export class AttendanceService {
     return result;
   }
 
-  static async update(id: string, input: any, userId?: string, accessLevel?: string) {
+  static async update(id: string, input: any, userId?: string, accessLevel?: string, ipAddress?: string) {
     const existing = await db.prepare('SELECT * FROM attendance WHERE id = ?').get(id) as any;
     if (!existing) throw new AppError(404, 'Record not found');
     const isAdmin = accessLevel === 'director' || accessLevel === 'hr';
@@ -660,6 +660,11 @@ export class AttendanceService {
       const requested = Object.keys(input ?? {}).filter((k) => input[k] !== undefined);
       const disallowed = requested.filter((k) => !allowedForSelf.includes(k));
       if (disallowed.length > 0) throw new AppError(403, `Only location fields can be updated by an employee (disallowed: ${disallowed.join(', ')})`);
+      // Enforce the director-controlled location toggle on the server too (the client may be stale).
+      if (requested.some((k) => allowedForSelf.includes(k))) {
+        const priv = await db.prepare('SELECT location_enabled FROM users WHERE id = ?').get(existing.user_id) as any;
+        if (priv && Number(priv.location_enabled) === 0) throw new AppError(403, 'Location capture is disabled for your account (director-controlled).');
+      }
     }
 
     // Auto-calculate hours/pause from the edited times when the caller did not supply the
@@ -731,7 +736,7 @@ export class AttendanceService {
     // Log a short diff of what changed
     try {
       const before = isAdmin ? existing : { latitude: existing.latitude, longitude: existing.longitude, location_accuracy: existing.location_accuracy, location_captured_at: existing.location_captured_at };
-      await ActivityLogsService.createFromDiff(userId ?? null, isAdmin ? 'update_attendance' : 'update_attendance_location', 'attendance', id, before, updated, undefined, undefined);
+      await ActivityLogsService.createFromDiff(userId ?? null, isAdmin ? 'update_attendance' : 'update_attendance_location', 'attendance', id, before, updated, undefined, ipAddress);
     } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     emitAttendanceUpdated(existing.user_id, updated);
     return updated;
