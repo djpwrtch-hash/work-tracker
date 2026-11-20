@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, getApiError } from '@/lib/api';
 import { listenOnSocket } from '@/lib/socket';
 import { formatDateTime } from '@/lib/utils';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Send, Loader2, MessageCircle, Search, CheckCheck } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -14,6 +14,8 @@ export default function ChatPage() {
   const qc = useQueryClient();
   const isAdmin = user?.accessLevel === 'director' || user?.accessLevel === 'hr';
   const [selectedThread, setSelectedThread] = useState<string | null>(null);
+  // The clicked row is tracked by employeeId because several rows can share one threadId.
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [search, setSearch] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -45,8 +47,32 @@ export default function ChatPage() {
     refetchInterval: 15_000,
   });
 
-  const threads: any[] = threadsData?.threads ?? [];
   const messages: any[] = messagesData?.messages ?? [];
+
+  // Collapse duplicate employee rows (a concurrent "ensure thread" can create more than one).
+  // Prefer the row for the currently open thread, otherwise the first row that has a thread.
+  const threads = useMemo(() => {
+    const byEmployee = new Map<string, any>();
+    for (const t of (threadsData?.threads ?? [])) {
+      const key = t.employeeId ?? t.threadId;
+      const existing = byEmployee.get(key);
+      if (!existing) { byEmployee.set(key, t); continue; }
+      if (t.threadId === selectedThread) byEmployee.set(key, t);
+      else if (!existing.threadId && t.threadId) byEmployee.set(key, t);
+    }
+    return [...byEmployee.values()];
+  }, [threadsData, selectedThread]);
+
+  // Dev-only diagnostic: helps confirm duplicate rows coming from the API.
+  useEffect(() => {
+    if (!import.meta.env?.DEV) return;
+    const list: any[] = threadsData?.threads ?? [];
+    const dupEmployees = list.map((t) => t.employeeId).filter((id, i, arr) => id && arr.indexOf(id) !== i);
+    const dupThreads = list.map((t) => t.threadId).filter((id, i, arr) => id && arr.indexOf(id) !== i);
+    if (dupEmployees.length) console.warn('[Chat] duplicate employee rows:', [...new Set(dupEmployees)]);
+    if (dupThreads.length) console.warn('[Chat] rows sharing a threadId:', [...new Set(dupThreads)]);
+  }, [threadsData]);
+
   const quotaLimit: number | null = quotaData?.limit ?? null;
   const quotaRemaining: number | null = quotaData?.remaining ?? null;
   const resetsOn: string = quotaData?.resetsOn ?? '';
@@ -170,13 +196,16 @@ export default function ChatPage() {
   });
 
   const myThread = threads[0];
-  const selectedEmployee = selectedThread ? threads.find((t: any) => t.threadId === selectedThread) : undefined;
+  const selectedEmployee = (selectedEmployeeId ? threads.find((t: any) => t.employeeId === selectedEmployeeId) : undefined)
+    ?? (selectedThread ? threads.find((t: any) => t.threadId === selectedThread) : undefined);
   const headerTitle = isAdmin ? (selectedEmployee ? `${selectedEmployee.employeeFirstName} ${selectedEmployee.employeeLastName}` : 'Chat') : 'HR Support';
 
   // Click an employee row — ensures a thread exists (admin)
   const openEmployee = (t: any) => {
+    setSelectedEmployeeId(t.employeeId);
     if (t.threadId) { latestOpenEmployeeRef.current = null; setSelectedThread(t.threadId); return; }
     latestOpenEmployeeRef.current = t.employeeId;
+    setSelectedThread(null);
     ensureThread.mutate(t.employeeId);
   };
 
@@ -199,8 +228,8 @@ export default function ChatPage() {
               ) : filteredThreads.length === 0 ? (
                 <p className="px-4 py-8 text-center text-sm text-slate-500">No employees match your search</p>
               ) : filteredThreads.map((t: any) => (
-                <button key={t.employeeId} onClick={() => openEmployee(t)} disabled={ensureThread.isPending}
-                  className={`flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-slate-800 disabled:opacity-50 ${selectedThread !== null && selectedThread === t.threadId ? 'bg-slate-800' : ''}`}>
+                <button key={`${t.employeeId}-${t.threadId ?? 'none'}`} onClick={() => openEmployee(t)} disabled={ensureThread.isPending}
+                  className={`flex w-full items-center gap-3 border-l-2 border-transparent px-4 py-3 text-left transition hover:bg-slate-800/60 disabled:opacity-50 ${selectedEmployeeId !== null && selectedEmployeeId === t.employeeId ? 'border-violet-500 bg-violet-600/20' : ''}`}>
                   <Avatar user={{ firstName: t.employeeFirstName, lastName: t.employeeLastName, profilePictureUrl: t.profilePictureUrl }} size="sm" />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
