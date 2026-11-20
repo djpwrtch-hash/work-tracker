@@ -17,6 +17,7 @@ export default function ChatPage() {
   const [message, setMessage] = useState('');
   const [search, setSearch] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
+  const latestOpenEmployeeRef = useRef<string | null>(null);
 
   // Threads list
   const { data: threadsData, isLoading: threadsLoading } = useQuery({
@@ -40,6 +41,8 @@ export default function ChatPage() {
     queryKey: ['chatMessages', selectedThread],
     queryFn: async () => (selectedThread ? (await api.get(`/messages/threads/${selectedThread}`)).data : { messages: [] }),
     enabled: !!selectedThread && !!user,
+    refetchOnWindowFocus: true,
+    refetchInterval: 15_000,
   });
 
   const threads: any[] = threadsData?.threads ?? [];
@@ -59,19 +62,53 @@ export default function ChatPage() {
 
   const sendMutation = useMutation({
     mutationFn: async ({ threadId, content }: { threadId: string; content: string }) => (await api.post(`/messages/threads/${threadId}`, { content })).data,
-    onSuccess: () => { setMessage(''); qc.invalidateQueries({ queryKey: ['chatMessages', selectedThread] }); qc.invalidateQueries({ queryKey: ['chatThreads'] }); qc.invalidateQueries({ queryKey: ['chatUnread'] }); qc.invalidateQueries({ queryKey: ['chatQuota'] }); },
-    onError: (e) => { qc.invalidateQueries({ queryKey: ['chatQuota'] }); toast.error(getApiError(e, 'Failed to send message')); },
+    onMutate: async ({ threadId, content }) => {
+      await qc.cancelQueries({ queryKey: ['chatMessages', threadId] });
+      const prev = qc.getQueryData(['chatMessages', threadId]);
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      qc.setQueryData(['chatMessages', threadId], (old: any) => {
+        const base = old ?? { threadId, messages: [] };
+        if ((base.messages ?? []).some((m: any) => m.id === tempId)) return base;
+        return { ...base, messages: [...(base.messages ?? []), { id: tempId, threadId, senderId: user?.id, content, createdAt: new Date().toISOString() }] };
+      });
+      setMessage('');
+      return { prev, threadId };
+    },
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['chatMessages', variables.threadId] });
+      qc.invalidateQueries({ queryKey: ['chatThreads'] });
+      qc.invalidateQueries({ queryKey: ['chatUnread'] });
+      qc.invalidateQueries({ queryKey: ['chatQuota'] });
+    },
+    onError: (e, variables, ctx: any) => {
+      if (ctx?.prev !== undefined) qc.setQueryData(['chatMessages', variables.threadId], ctx.prev);
+      else qc.invalidateQueries({ queryKey: ['chatMessages', variables.threadId] });
+      setMessage(variables.content);
+      qc.invalidateQueries({ queryKey: ['chatQuota'] });
+      toast.error(getApiError(e, 'Failed to send message'));
+    },
   });
 
   const ensureThread = useMutation({
     mutationFn: async (employeeId: string) => (await api.post(`/messages/threads/ensure/${employeeId}`, {})).data,
-    onSuccess: (data: any) => { qc.invalidateQueries({ queryKey: ['chatThreads'] }); if (data?.threadId) setSelectedThread(data.threadId); },
-    onError: (e) => toast.error(getApiError(e, 'Failed to start chat')),
+    onSuccess: (data: any, variables: string) => {
+      qc.invalidateQueries({ queryKey: ['chatThreads'] });
+      // Ignore stale responses when the user clicked another employee meanwhile.
+      if (data?.threadId && latestOpenEmployeeRef.current === variables) setSelectedThread(data.threadId);
+    },
+    onError: (e, variables: string) => {
+      if (latestOpenEmployeeRef.current === variables) latestOpenEmployeeRef.current = null;
+      toast.error(getApiError(e, 'Failed to start chat'));
+    },
   });
 
   const markRead = useCallback(async (threadId: string) => {
     try { await api.patch(`/messages/threads/${threadId}/read`, {}); } catch (e) { console.error('[Chat] markRead failed:', e); }
-    qc.invalidateQueries({ queryKey: ['chatThreads'] });
+    // Patch the unread badge locally instead of refetching the whole list (avoids re-sort flicker).
+    qc.setQueryData(['chatThreads'], (old: any) => {
+      if (!old?.threads) return old;
+      return { ...old, threads: old.threads.map((t: any) => (t.threadId === threadId ? { ...t, unread: 0 } : t)) };
+    });
     qc.invalidateQueries({ queryKey: ['chatUnread'] });
   }, [qc]);
 
@@ -133,12 +170,13 @@ export default function ChatPage() {
   });
 
   const myThread = threads[0];
-  const selectedEmployee = threads.find((t: any) => t.threadId === selectedThread);
+  const selectedEmployee = selectedThread ? threads.find((t: any) => t.threadId === selectedThread) : undefined;
   const headerTitle = isAdmin ? (selectedEmployee ? `${selectedEmployee.employeeFirstName} ${selectedEmployee.employeeLastName}` : 'Chat') : 'HR Support';
 
   // Click an employee row — ensures a thread exists (admin)
   const openEmployee = (t: any) => {
-    if (t.threadId) { setSelectedThread(t.threadId); return; }
+    if (t.threadId) { latestOpenEmployeeRef.current = null; setSelectedThread(t.threadId); return; }
+    latestOpenEmployeeRef.current = t.employeeId;
     ensureThread.mutate(t.employeeId);
   };
 
@@ -162,7 +200,7 @@ export default function ChatPage() {
                 <p className="px-4 py-8 text-center text-sm text-slate-500">No employees match your search</p>
               ) : filteredThreads.map((t: any) => (
                 <button key={t.employeeId} onClick={() => openEmployee(t)} disabled={ensureThread.isPending}
-                  className={`flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-slate-800 disabled:opacity-50 ${selectedThread === t.threadId ? 'bg-slate-800' : ''}`}>
+                  className={`flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-slate-800 disabled:opacity-50 ${selectedThread !== null && selectedThread === t.threadId ? 'bg-slate-800' : ''}`}>
                   <Avatar user={{ firstName: t.employeeFirstName, lastName: t.employeeLastName, profilePictureUrl: t.profilePictureUrl }} size="sm" />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
