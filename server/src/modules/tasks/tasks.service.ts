@@ -112,10 +112,17 @@ export class TasksService {
     const taskIds = tasks.map(t => t.id);
     const assigneesStmt = db.prepare(`SELECT ta.task_id, ta.user_id, u.first_name, u.last_name, u.employee_id FROM task_assignments ta JOIN users u ON ta.user_id = u.id WHERE ta.task_id IN (${taskIds.map(() => '?').join(',')})`);
     const allAssignees = await assigneesStmt.all(...taskIds) as any[];
-    
+
+    const creatorIds = [...new Set(tasks.map((t) => t.created_by_id).filter(Boolean))];
+    const creators = creatorIds.length > 0
+      ? await db.prepare(`SELECT id, first_name, last_name FROM users WHERE id IN (${creatorIds.map(() => '?').join(',')})`).all(...creatorIds) as any[]
+      : [];
+    const creatorMap = new Map(creators.map((c: any) => [c.id, c]));
+
     const enriched = tasks.map((t) => {
       const assignees = allAssignees.filter(a => a.task_id === t.id);
-      return { ...mapTask(t), assignees: assignees.map((a: any) => ({ userId: a.user_id, firstName: a.first_name, lastName: a.last_name, employeeId: a.employee_id })) };
+      const creator = creatorMap.get(t.created_by_id) as any;
+      return { ...mapTask(t), createdByName: creator ? `${creator.first_name} ${creator.last_name}` : null, assignees: assignees.map((a: any) => ({ userId: a.user_id, firstName: a.first_name, lastName: a.last_name, employeeId: a.employee_id })) };
     });
     return { tasks: enriched, total: count, page, limit };
   }

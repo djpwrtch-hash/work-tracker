@@ -45,7 +45,7 @@ export default function TeamPage() {
   const teamForTasks = showTasks ? data?.find((t: any) => t.teamName === showTasks) : null;
   const { data: teamTasks } = useQuery({
     queryKey: ['teamTasks', showTasks],
-    queryFn: async () => (await api.get('/tasks', { params: { assigneeIds: teamForTasks?.members?.map((m: any) => m.userId) } })).data,
+    queryFn: async () => (await api.get('/tasks', { params: { assigneeIds: teamForTasks?.members?.map((m: any) => m.userId), limit: 100 } })).data,
     enabled: !loading && !!user && !!showTasks && !!teamForTasks,
   });
 
@@ -78,12 +78,9 @@ export default function TeamPage() {
 
   const teamForDashboard = showDashboard ? data?.find((t: any) => t.teamName === showDashboard) : null;
   const dashboardMemberIds = teamForDashboard?.members?.map((m: any) => m.userId) || [];
-  const { data: teamAttendance } = useQuery({
-    queryKey: ['teamAttendance', showDashboard, ...dashboardMemberIds],
-    queryFn: async () => {
-      const today = new Date().toLocaleDateString('en-CA');
-      return (await api.get('/attendance', { params: { startDate: today, endDate: today, userIds: dashboardMemberIds, limit: 100 } })).data;
-    },
+  const { data: dashboardTasks } = useQuery({
+    queryKey: ['teamDashboardTasks', showDashboard, ...dashboardMemberIds],
+    queryFn: async () => (await api.get('/tasks', { params: { assigneeIds: dashboardMemberIds, limit: 100 } })).data,
     enabled: !loading && !!user && !!showDashboard && dashboardMemberIds.length > 0,
   });
 
@@ -166,7 +163,7 @@ export default function TeamPage() {
           </div>
         )}
         <div className="flex items-center justify-between flex-wrap gap-3">
-          <h1 className="text-2xl font-bold text-white">Teams</h1>
+          <h1 className="text-2xl font-bold text-white">Project Teams</h1>
           {isAdmin && (
             <div className="flex gap-2">
               <button onClick={() => setShowExport(true)} className="flex items-center gap-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2.5 text-sm font-medium transition border border-slate-700"><Download className="h-4 w-4" />Export</button>
@@ -180,7 +177,7 @@ export default function TeamPage() {
         {isLoading ? (
           <div className="text-center py-8 text-slate-500">Loading...</div>
         ) : data?.length === 0 ? (
-          <div className="text-center py-12 text-slate-500"><Users className="h-12 w-12 mx-auto mb-3 opacity-30" /><p>{isAdmin ? 'No teams created yet' : 'You are not part of any team yet'}</p></div>
+          <div className="text-center py-12 text-slate-500"><Users className="h-12 w-12 mx-auto mb-3 opacity-30" /><p>{isAdmin ? 'No project teams created yet' : 'You are not part of any project team yet'}</p></div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {data?.map((team: any) => (
@@ -384,48 +381,80 @@ export default function TeamPage() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
           <div className="bg-slate-800 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-2"><Briefcase className="h-4 w-4 text-violet-400" /><span className="text-sm text-slate-400">Total Tasks</span></div>
-            <p className="text-2xl font-bold text-white">{teamTasks?.tasks?.length || 0}</p>
+            <p className="text-2xl font-bold text-white">{dashboardTasks?.tasks?.length || 0}</p>
           </div>
           <div className="bg-slate-800 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-2"><CheckCircle2 className="h-4 w-4 text-emerald-400" /><span className="text-sm text-slate-400">Completed</span></div>
-            <p className="text-2xl font-bold text-white">{teamTasks?.tasks?.filter((t: any) => t.status === 'completed').length || 0}</p>
+            <p className="text-2xl font-bold text-white">{dashboardTasks?.tasks?.filter((t: any) => t.status === 'completed').length || 0}</p>
           </div>
           <div className="bg-slate-800 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-2"><Clock className="h-4 w-4 text-blue-400" /><span className="text-sm text-slate-400">Avg Progress</span></div>
-            <p className="text-2xl font-bold text-white">{teamTasks?.tasks?.length ? Math.round(teamTasks.tasks.reduce((acc: number, t: any) => acc + t.progressPercent, 0) / teamTasks.tasks.length) : 0}%</p>
+            <p className="text-2xl font-bold text-white">{dashboardTasks?.tasks?.length ? Math.round(dashboardTasks.tasks.reduce((acc: number, t: any) => acc + t.progressPercent, 0) / dashboardTasks.tasks.length) : 0}%</p>
           </div>
         </div>
         <div className="space-y-4">
-          <h3 className="text-sm font-medium text-slate-300">Team Members</h3>
+          <h3 className="text-sm font-medium text-slate-300">Member Performance</h3>
           <div className="space-y-2">
             {teamForDashboard?.members?.map((m: any) => {
-              const att = teamAttendance?.records?.find((r: any) => r.user_id === m.userId);
-              const attStatus = att?.status;
+              const memberTasks = dashboardTasks?.tasks?.filter((t: any) => t.assignees?.some((a: any) => a.userId === m.userId)) || [];
+              const done = memberTasks.filter((t: any) => t.status === 'completed').length;
               return (
                 <div key={m.userId} className="flex items-center justify-between bg-slate-800 rounded-lg p-3">
                   <div className="flex items-center gap-2">
                     <div className="h-8 w-8 rounded-lg bg-slate-700 flex items-center justify-center text-slate-400 text-xs font-bold">{m.firstName[0]}{m.lastName[0]}</div>
                     <span className="text-sm text-slate-300">{m.firstName} {m.lastName}</span>
-                    {attStatus && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                        attStatus === 'present' || attStatus === 'remote' ? 'bg-emerald-500/20 text-emerald-400' :
-                        attStatus === 'absent' ? 'bg-rose-500/20 text-rose-400' :
-                        attStatus === 'leave' ? 'bg-amber-500/20 text-amber-400' :
-                        attStatus === 'holiday' ? 'bg-blue-500/20 text-blue-400' :
-                        attStatus === 'half_day' ? 'bg-orange-500/20 text-orange-400' :
-                        'bg-slate-500/20 text-slate-400'
-                      }`}>
-                        {attStatus.replace('_', ' ')}
-                      </span>
-                    )}
                   </div>
                   <div className="text-xs text-slate-500">
-                    {teamTasks?.tasks?.filter((t: any) => t.assignees?.some((a: any) => a.userId === m.userId)).length || 0} tasks
+                    {memberTasks.length} tasks · {done} completed
                   </div>
                 </div>
               );
             })}
           </div>
+        </div>
+
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium text-slate-300">Tasks &amp; Stages</h3>
+          {(!dashboardTasks?.tasks || dashboardTasks.tasks.length === 0) ? (
+            <p className="text-center text-slate-500 py-6 text-sm">No tasks assigned to this team</p>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-slate-800">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-800/60 text-slate-400">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">Task</th>
+                    <th className="px-3 py-2 font-medium">Priority</th>
+                    <th className="px-3 py-2 font-medium">Status</th>
+                    <th className="px-3 py-2 font-medium">Assigned to</th>
+                    <th className="px-3 py-2 font-medium">Assigned by</th>
+                    <th className="px-3 py-2 font-medium">Due</th>
+                    <th className="px-3 py-2 font-medium">Progress</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {dashboardTasks.tasks.map((task: any) => (
+                    <tr key={task.id} className="text-slate-300">
+                      <td className="px-3 py-2">
+                        <p className="font-medium text-white">{task.title}</p>
+                        {task.description && <p className="text-[11px] text-slate-500 truncate max-w-[220px]">{task.description}</p>}
+                      </td>
+                      <td className="px-3 py-2"><span className={`inline-flex px-2 py-0.5 rounded-md text-[11px] font-medium border ${statusColor(task.priority)}`}>{task.priority}</span></td>
+                      <td className="px-3 py-2"><span className="capitalize">{String(task.status).replace('_', ' ')}</span></td>
+                      <td className="px-3 py-2">{task.assignees?.map((a: any) => `${a.firstName} ${a.lastName}`).join(', ') || '-'}</td>
+                      <td className="px-3 py-2">{task.createdByName || '-'}</td>
+                      <td className="px-3 py-2">{task.dueDate ? new Date(task.dueDate).toLocaleDateString() : '-'}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2 min-w-[110px]">
+                          <div className="flex-1 h-1.5 bg-slate-700 rounded-full overflow-hidden"><div className="h-full bg-violet-500 rounded-full" style={{ width: `${task.progressPercent}%` }} /></div>
+                          <span className="text-[11px] text-slate-400">{task.progressPercent}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </Modal>
     </DashboardLayout>

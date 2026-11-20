@@ -104,7 +104,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { name: 'Documents', href: '/documents', icon: FileBadge, show: true },
     { name: 'Files', href: '/files', icon: FolderOpen, show: true },
     { name: 'Employee Database', href: '/employee-database', icon: Database, show: isAdminOrHr },
-    { name: 'Team', href: '/team', icon: Users, show: true },
+    { name: 'Project Team', href: '/team', icon: Users, show: true },
     { name: 'Holidays', href: '/holidays', icon: Sun, show: isAdminOrHr },
     { name: 'Departments', href: '/departments', icon: Building2, show: true },
     { name: 'Roles', href: '/roles', icon: ShieldCheck, show: isAdminOrHr },
