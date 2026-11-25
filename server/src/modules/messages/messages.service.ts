@@ -149,8 +149,8 @@ export class MessagesService {
     return { message };
   }
 
-  static async markRead(threadId: string, userId: string) {
-    await MessagesService.assertParticipant(threadId, userId, undefined);
+  static async markRead(threadId: string, userId: string, accessLevel?: string) {
+    await MessagesService.assertParticipant(threadId, userId, accessLevel);
     await db.prepare('UPDATE thread_participants SET last_read_at = NOW() WHERE thread_id = ? AND user_id = ?').run(threadId, userId);
     const others = await db.prepare('SELECT user_id FROM thread_participants WHERE thread_id = ? AND user_id != ?').all(threadId, userId) as any[];
     for (const o of others) {

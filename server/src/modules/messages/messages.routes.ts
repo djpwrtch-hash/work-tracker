@@ -56,7 +56,7 @@ router.post('/threads/:id', requireUuid('id'), validate(sendMessageSchema), asyn
 /** Mark a thread as read for the current user. */
 router.patch('/threads/:id/read', requireUuid('id'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json(await MessagesService.markRead(req.params.id!, req.user!.sub));
+    res.json(await MessagesService.markRead(req.params.id!, req.user!.sub, req.user!.accessLevel));
   } catch (err) { next(err); }
 });
 
