@@ -242,8 +242,6 @@ export class LeavesService {
       if (overlap) throw new AppError(409, 'Leave request overlaps with existing leave');
       const id = uuid();
       let extra = 0;
-      // Half-day leave consumes 0.5 day; otherwise count working days
-      const requestedDays = duration === 'half_day' ? 0.5 : (await workingDates(userId, startDate, endDate)).length;
       let workingDays: string[] = [];
       if (isAutoApprove) {
         workingDays = await workingDates(userId, startDate, endDate);

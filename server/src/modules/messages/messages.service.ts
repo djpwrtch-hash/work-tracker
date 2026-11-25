@@ -159,8 +159,7 @@ export class MessagesService {
     return { ok: true };
   }
 
-  static async unreadCount(userId: string, accessLevel?: string) {
-    const isAdmin = accessLevel === 'director' || accessLevel === 'hr';
+  static async unreadCount(userId: string) {
     const row = await db.prepare(`
       SELECT COUNT(*) AS count FROM messages m
       JOIN thread_participants tp ON tp.thread_id = m.thread_id AND tp.user_id = ?

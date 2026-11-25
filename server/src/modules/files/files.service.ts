@@ -52,10 +52,6 @@ function isAdminRole(role: string): boolean {
   return role === 'director' || role === 'hr';
 }
 
-function isDirector(role: string): boolean {
-  return role === 'director';
-}
-
 export class FilesService {
   static async upload(userId: string, file: { mimetype: string; size: number; originalname: string; buffer: Buffer }): Promise<any> {
     if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {

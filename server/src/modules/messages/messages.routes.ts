@@ -35,7 +35,7 @@ router.get('/quota', async (req: Request, res: Response, next: NextFunction) => 
 /** Unread count for the current user (for the Chat nav badge). */
 router.get('/threads/unread-count', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json(await MessagesService.unreadCount(req.user!.sub, req.user!.accessLevel));
+    res.json(await MessagesService.unreadCount(req.user!.sub));
   } catch (err) { next(err); }
 });
 
