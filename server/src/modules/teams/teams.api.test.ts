@@ -54,4 +54,35 @@ describe('teams API', () => {
     expect(listA.body.tasks.map((t: any) => t.id)).toContain(task.body.id);
     expect(listB.body.tasks.map((t: any) => t.id)).not.toContain(task.body.id);
   });
+
+  it('shows ALL team tasks to every member, isolated per team, with assignee + assigned-by names', async () => {
+    const director = await createUser({ role: 'director', password: 'Password123!' });
+    const member1 = await createUser({ password: 'Password123!' });
+    const member2 = await createUser({ password: 'Password123!' });
+    const outsider = await createUser({ password: 'Password123!' });
+    const { token: dirToken } = await loginAs(director.email, 'Password123!');
+    const { token: member2Token } = await loginAs(member2.email, 'Password123!');
+    const { token: outsiderToken } = await loginAs(outsider.email, 'Password123!');
+    const teamName = `TeamDash ${Date.now()}`;
+
+    await request(app).post('/api/v1/teams').set(authHeader(dirToken)).send({ teamName, memberIds: [member1.id, member2.id] });
+
+    // Task assigned to member1 only; member2 should still see it on the team dashboard.
+    const task = await request(app).post('/api/v1/tasks').set(authHeader(dirToken))
+      .send({ title: 'Shared task', assigneeIds: [member1.id], teamName });
+    expect(task.status).toBe(201);
+
+    // Team-scoped list for a member NOT personally assigned still returns it.
+    const member2List = await request(app).get('/api/v1/tasks').query({ teamName, limit: 100 }).set(authHeader(member2Token));
+    expect(member2List.status).toBe(200);
+    const row = member2List.body.tasks.find((t: any) => t.id === task.body.id);
+    expect(row).toBeTruthy();
+    expect(row.assignees.map((a: any) => `${a.firstName} ${a.lastName}`)).toContain(`${member1.firstName} ${member1.lastName}`);
+    expect(row.createdByName).toBe(`${director.firstName} ${director.lastName}`);
+
+    // Outsider employee (not a member) sees nothing for this team.
+    const outsiderList = await request(app).get('/api/v1/tasks').query({ teamName, limit: 100 }).set(authHeader(outsiderToken));
+    expect(outsiderList.status).toBe(200);
+    expect(outsiderList.body.tasks).toHaveLength(0);
+  });
 });

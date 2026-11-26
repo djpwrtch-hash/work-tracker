@@ -82,7 +82,15 @@ export class TasksService {
     const offset = (page - 1) * limit;
     const conds: string[] = []; const params: any[] = [];
 
-    if (role === 'employee') {
+    // Team-scoped view: show ALL tasks tagged with this team to ALL members.
+    // Skip the per-user employee restriction; still require team membership (admins bypass).
+    if (teamName) {
+      if (role === 'employee') {
+        const member = await db.prepare('SELECT 1 FROM team_members WHERE team_name = ? AND user_id = ?').get(teamName, userId);
+        if (!member) return { tasks: [], total: 0, page, limit };
+      }
+      conds.push('t.team_name = ?'); params.push(teamName);
+    } else if (role === 'employee') {
       conds.push(`t.id IN (SELECT task_id FROM task_assignments WHERE user_id = ? UNION SELECT id FROM tasks WHERE created_by_id = ?)`);
       params.push(userId, userId);
     }
@@ -99,7 +107,6 @@ export class TasksService {
       params.push(...priorities);
     }
     if (departmentId) { conds.push('t.department_id = ?'); params.push(departmentId); }
-    if (teamName) { conds.push('t.team_name = ?'); params.push(teamName); }
     if (search) { conds.push("t.title LIKE ? ESCAPE '\\\\'"); params.push(`%${search.replace(/[\\%_]/g, (c: string) => '\\' + c)}%`); }
     if (dueBefore) { conds.push('t.due_date < ?'); params.push(new Date(dueBefore).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '')); }
     if (dueAfter) { conds.push('t.due_date > ?'); params.push(new Date(dueAfter).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '')); }

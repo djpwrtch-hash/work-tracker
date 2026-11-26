@@ -81,7 +81,21 @@ export default function TeamPage() {
   const teamForDashboard = showDashboard ? data?.find((t: any) => t.teamName === showDashboard) : null;
   const { data: dashboardTasks } = useQuery({
     queryKey: ['teamDashboardTasks', showDashboard],
-    queryFn: async () => (await api.get('/tasks', { params: { teamName: showDashboard, limit: 100 } })).data,
+    queryFn: async () => {
+      const teamName = showDashboard!;
+      const first = await api.get('/tasks', { params: { teamName, page: 1, limit: 100 } });
+      const acc: any[] = [...(first.data.tasks ?? [])];
+      const total = first.data.total ?? acc.length;
+      let page = 1;
+      while (acc.length < total) {
+        page += 1;
+        const r = await api.get('/tasks', { params: { teamName, page, limit: 100 } });
+        const batch = r.data.tasks ?? [];
+        if (batch.length === 0) break;
+        acc.push(...batch);
+      }
+      return { tasks: acc, total };
+    },
     enabled: !loading && !!user && !!showDashboard,
   });
 
