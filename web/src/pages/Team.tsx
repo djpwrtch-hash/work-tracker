@@ -4,8 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, getApiError } from '@/lib/api';
 import { listenOnSocket } from '@/lib/socket';
 import { statusColor, displayRole, formatDateTime } from '@/lib/utils';
-import { useState, useEffect, useRef } from 'react';
-import { Users, Plus, Loader2, UserMinus, UserPlus, Trash2, Briefcase, Clock, CheckCircle2, Download, MessageSquare, Send, Pencil } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Users, Plus, Loader2, UserMinus, UserPlus, Trash2, Briefcase, Clock, CheckCircle2, Download, MessageSquare, Send, Pencil, Search, X } from 'lucide-react';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { toast } from 'sonner';
 import { dynamic } from '@/lib/dynamic';
@@ -49,6 +49,7 @@ export default function TeamPage() {
   // Team editing (create/update/leader/members/delete) is director-only.
   const isDirector = user?.accessLevel === 'director' || user?.role === 'director';
   const [showCreate, setShowCreate] = useState(false);
+  const [teamSearch, setTeamSearch] = useState('');
   const [showManage, setShowManage] = useState<string | null>(null);
   const [showTasks, setShowTasks] = useState<string | null>(null);
   const [showDashboard, setShowDashboard] = useState<string | null>(null);
@@ -70,6 +71,16 @@ export default function TeamPage() {
     enabled: !loading && !!user,
   });
   const { data: users } = useQuery({ queryKey: ['usersList', 100], queryFn: async () => (await api.get('/users?limit=100')).data, enabled: !loading && !!user && isAdmin });
+
+  // Client-side search over project teams (name + member names); does not affect task isolation.
+  const filteredTeams = useMemo(() => {
+    const q = teamSearch.trim().toLowerCase();
+    if (!q) return data ?? [];
+    return (data ?? []).filter((t: any) =>
+      t.teamName.toLowerCase().includes(q) ||
+      (t.members ?? []).some((m: any) => `${m.firstName} ${m.lastName}`.toLowerCase().includes(q))
+    );
+  }, [data, teamSearch]);
 
   const teamForTasks = showTasks ? data?.find((t: any) => t.teamName === showTasks) : null;
   const { data: teamTasks } = useQuery({
@@ -244,13 +255,38 @@ export default function TeamPage() {
           )}
         </div>
 
+        {!isLoading && (data?.length ?? 0) > 0 && (
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+            <input
+              value={teamSearch}
+              onChange={(e) => setTeamSearch(e.target.value)}
+              placeholder="Search project teams..."
+              aria-label="Search teams"
+              maxLength={200}
+              className="w-full rounded-xl border border-slate-700 bg-slate-900 pl-9 pr-9 py-2.5 text-sm text-white placeholder:text-slate-500 focus:border-violet-500 focus:outline-none"
+            />
+            {teamSearch && (
+              <button onClick={() => setTeamSearch('')} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition">
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        )}
+
         {isLoading ? (
           <div className="text-center py-8 text-slate-500">Loading...</div>
         ) : data?.length === 0 ? (
           <div className="text-center py-12 text-slate-500"><Users className="h-12 w-12 mx-auto mb-3 opacity-30" /><p>{isAdmin ? 'No project teams created yet' : 'You are not part of any project team yet'}</p></div>
+        ) : filteredTeams.length === 0 ? (
+          <div className="text-center py-12 text-slate-500">
+            <Search className="h-10 w-10 mx-auto mb-3 opacity-30" />
+            <p className="text-sm">No project teams match "{teamSearch}"</p>
+            <button onClick={() => setTeamSearch('')} className="mt-3 text-violet-400 hover:text-violet-300 text-sm font-medium">Clear search</button>
+          </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {data?.map((team: any) => (
+            {filteredTeams.map((team: any) => (
               <div key={team.teamName} className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
                 <div className="flex items-center gap-3 mb-3">
                   <div className="h-10 w-10 rounded-xl bg-violet-500/15 border border-violet-500/20 flex items-center justify-center text-violet-400 font-bold text-sm">
