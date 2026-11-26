@@ -85,4 +85,53 @@ describe('teams API', () => {
     expect(outsiderList.status).toBe(200);
     expect(outsiderList.body.tasks).toHaveLength(0);
   });
+
+  it('lets only a director rename a team, preserving members + re-tagging tasks', async () => {
+    const director = await createUser({ role: 'director', password: 'Password123!' });
+    const hr = await createUser({ role: 'hr', password: 'Password123!' });
+    const member = await createUser({ password: 'Password123!' });
+    const { token: dirToken } = await loginAs(director.email, 'Password123!');
+    const { token: hrToken } = await loginAs(hr.email, 'Password123!');
+    const oldName = `Rename ${Date.now()}`;
+    const newName = `Renamed ${Date.now()}`;
+
+    await request(app).post('/api/v1/teams').set(authHeader(dirToken)).send({ teamName: oldName, memberIds: [member.id], leaderId: member.id });
+    const task = await request(app).post('/api/v1/tasks').set(authHeader(dirToken)).send({ title: 'T', assigneeIds: [member.id], teamName: oldName });
+    expect(task.status).toBe(201);
+
+    // non-director cannot rename
+    const hrAttempt = await request(app).put(`/api/v1/teams/${encodeURIComponent(oldName)}`).set(authHeader(hrToken)).send({ teamName: newName });
+    expect(hrAttempt.status).toBe(403);
+
+    // director renames
+    const renamed = await request(app).put(`/api/v1/teams/${encodeURIComponent(oldName)}`).set(authHeader(dirToken)).send({ teamName: newName });
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.teamName).toBe(newName);
+    expect(renamed.body.members.map((m: any) => m.userId)).toContain(member.id);
+    expect(renamed.body.members.find((m: any) => m.userId === member.id)?.memberRole).toBe('leader');
+
+    // old name is gone
+    const old = await request(app).get(`/api/v1/teams/${encodeURIComponent(oldName)}`).set(authHeader(dirToken));
+    expect(old.status).toBe(404);
+
+    // tasks re-tagged under the new name
+    const list = await request(app).get('/api/v1/tasks').query({ teamName: newName, limit: 100 }).set(authHeader(dirToken));
+    expect(list.body.tasks.map((t: any) => t.id)).toContain(task.body.id);
+    const oldTasks = await request(app).get('/api/v1/tasks').query({ teamName: oldName, limit: 100 }).set(authHeader(dirToken));
+    expect(oldTasks.body.tasks.map((t: any) => t.id)).not.toContain(task.body.id);
+  });
+
+  it('rejects renaming to an existing team name with 409', async () => {
+    const director = await createUser({ role: 'director', password: 'Password123!' });
+    const a = await createUser({ password: 'Password123!' });
+    const b = await createUser({ password: 'Password123!' });
+    const { token } = await loginAs(director.email, 'Password123!');
+    const t1 = `Conflict A ${Date.now()}`;
+    const t2 = `Conflict B ${Date.now()}`;
+    await request(app).post('/api/v1/teams').set(authHeader(token)).send({ teamName: t1, memberIds: [a.id] });
+    await request(app).post('/api/v1/teams').set(authHeader(token)).send({ teamName: t2, memberIds: [b.id] });
+
+    const res = await request(app).put(`/api/v1/teams/${encodeURIComponent(t1)}`).set(authHeader(token)).send({ teamName: t2 });
+    expect(res.status).toBe(409);
+  });
 });

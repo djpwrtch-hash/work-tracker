@@ -53,7 +53,9 @@ router.put('/:teamName', requireRole('director'), validate(updateTeamSchema), as
   try {
     const team = await TeamsService.update(req.params.teamName!, req.body);
     cache.delContaining('/api/v1/teams');
-    try { await ActivityLogsService.createDiff(req.user!.sub, 'update_team', 'team', req.params.teamName!, `Updated team ${req.params.teamName}`); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
+    const renamed = req.body?.teamName && req.body.teamName !== req.params.teamName;
+    const msg = renamed ? `Renamed team ${req.params.teamName} to ${req.body.teamName}` : `Updated team ${req.params.teamName}`;
+    try { await ActivityLogsService.createDiff(req.user!.sub, 'update_team', 'team', req.params.teamName!, msg); } catch (e) { console.error('[ActivityLogs] Failed:', e); }
     res.json(team);
   } catch (err) { next(err); }
 });

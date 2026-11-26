@@ -52,24 +52,46 @@ export class TeamsService {
     return await this.getByName(input.teamName);
   }
 
-  static async update(teamName: string, input: { memberIds: string[]; leaderId?: string }) {
+  static async update(teamName: string, input: { teamName?: string; memberIds?: string[]; leaderId?: string }) {
     const exists = (await db.prepare('SELECT count(*) as c FROM team_members WHERE team_name = ?').get(teamName) as any).c;
     if (exists === 0) throw new AppError(404, 'Team not found');
-    if (input.leaderId && !input.memberIds.includes(input.leaderId)) {
+    const current = await this.getByName(teamName);
+    const currentMemberIds = current.members.map((m: any) => m.userId);
+    const currentLeaderId = current.members.find((m: any) => m.memberRole === 'leader')?.userId;
+
+    const newName = input.teamName && input.teamName !== teamName ? input.teamName : null;
+    if (newName) {
+      const conflict = (await db.prepare('SELECT count(*) as c FROM team_members WHERE team_name = ?').get(newName) as any).c;
+      if (conflict > 0) throw new AppError(409, 'Team name already exists');
+    }
+
+    const memberIds = input.memberIds ?? currentMemberIds;
+    const leaderId = input.memberIds ? input.leaderId : (input.leaderId ?? currentLeaderId);
+    if (leaderId && !memberIds.includes(leaderId)) {
       throw new AppError(400, 'Leader must be a team member');
     }
+
+    const effectiveName = newName ?? teamName;
+    const wantsMemberUpdate = input.memberIds !== undefined || input.leaderId !== undefined;
+
     await db.transaction(async () => {
-      await db.prepare('DELETE FROM team_members WHERE team_name = ?').run(teamName);
-      if (input.memberIds.length > 0) {
-        const ph = input.memberIds.map(() => '(?, ?, ?)').join(', ');
-        const p: any[] = [];
-        for (const uid of input.memberIds) {
-          p.push(uid, teamName, uid === input.leaderId ? 'leader' : 'member');
+      if (newName) {
+        await db.prepare('UPDATE team_members SET team_name = ? WHERE team_name = ?').run(newName, teamName);
+        await db.prepare('UPDATE tasks SET team_name = ? WHERE team_name = ?').run(newName, teamName);
+      }
+      if (wantsMemberUpdate) {
+        await db.prepare('DELETE FROM team_members WHERE team_name = ?').run(effectiveName);
+        if (memberIds.length > 0) {
+          const ph = memberIds.map(() => '(?, ?, ?)').join(', ');
+          const p: any[] = [];
+          for (const uid of memberIds) {
+            p.push(uid, effectiveName, uid === leaderId ? 'leader' : 'member');
+          }
+          await db.prepare(`INSERT INTO team_members (user_id, team_name, role) VALUES ${ph}`).run(...p);
         }
-        await db.prepare(`INSERT INTO team_members (user_id, team_name, role) VALUES ${ph}`).run(...p);
       }
     })();
-    return await this.getByName(teamName);
+    return await this.getByName(effectiveName);
   }
 
   static async delete(teamName: string) {

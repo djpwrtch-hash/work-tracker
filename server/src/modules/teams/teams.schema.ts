@@ -11,9 +11,10 @@ export const createTeamSchema = z.object({
 });
 
 export const updateTeamSchema = z.object({
-  memberIds: z.array(z.string().trim().min(1)).min(1),
+  teamName: z.string().trim().min(1).max(200).optional(), // new name (rename)
+  memberIds: z.array(z.string().trim().min(1)).min(1).optional(),
   leaderId: z.string().trim().min(1).optional(),
-});
+}).refine((d) => d.teamName || d.memberIds || d.leaderId, { message: 'Nothing to update' });
 
 export const addMembersSchema = z.object({
   userIds: z.array(z.string().trim().min(1)).min(1, 'At least one user ID is required'),

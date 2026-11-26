@@ -5,7 +5,7 @@ import { api, getApiError } from '@/lib/api';
 import { listenOnSocket } from '@/lib/socket';
 import { statusColor, displayRole, formatDateTime } from '@/lib/utils';
 import { useState, useEffect, useRef } from 'react';
-import { Users, Plus, Loader2, UserMinus, UserPlus, Trash2, Briefcase, Clock, CheckCircle2, Download, MessageSquare, Send } from 'lucide-react';
+import { Users, Plus, Loader2, UserMinus, UserPlus, Trash2, Briefcase, Clock, CheckCircle2, Download, MessageSquare, Send, Pencil } from 'lucide-react';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { toast } from 'sonner';
 import { dynamic } from '@/lib/dynamic';
@@ -13,6 +13,33 @@ import type { ExportColumn } from '@/components/ExportDialog';
 import Modal from '@/components/Modal';
 
 const ExportDialog = dynamic(() => import('@/components/ExportDialog'), { ssr: false });
+
+function TeamNameEditor({ initial, pending, onRename }: { initial: string; pending: boolean; onRename: (name: string) => void }) {
+  const [value, setValue] = useState(initial);
+  const trimmed = value.trim();
+  const canRename = trimmed.length > 0 && trimmed !== initial && !pending;
+  const submit = () => { if (canRename) onRename(trimmed); };
+  return (
+    <div className="flex gap-2">
+      <input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }}
+        maxLength={200}
+        className="flex-1 rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-sm text-white"
+        aria-label="Team name"
+      />
+      <button
+        onClick={submit}
+        disabled={!canRename}
+        className="flex items-center gap-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white px-4 py-2.5 text-sm font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />}
+        Rename
+      </button>
+    </div>
+  );
+}
 
 export default function TeamPage() {
   const { confirm } = useConfirm();
@@ -177,6 +204,22 @@ export default function TeamPage() {
     onError: (e) => toast.error(getApiError(e, 'Failed to update team leader')),
   });
 
+  // Director-only: rename a team (project name). Cascades to member + task tags server-side.
+  const renameTeam = useMutation({
+    mutationFn: async ({ teamName, newName }: { teamName: string; newName: string }) =>
+      (await api.put(`/teams/${encodeURIComponent(teamName)}`, { teamName: newName })).data,
+    onSuccess: (data: any, { teamName }) => {
+      toast.success('Team renamed');
+      qc.invalidateQueries({ queryKey: ['teams'] });
+      qc.invalidateQueries({ queryKey: ['teamTasks'] });
+      qc.invalidateQueries({ queryKey: ['teamDashboardTasks'] });
+      if (showTasks === teamName) setShowTasks(data?.teamName ?? null);
+      if (showDashboard === teamName) setShowDashboard(data?.teamName ?? null);
+      setShowManage(data?.teamName ?? null);
+    },
+    onError: (e) => toast.error(getApiError(e, 'Failed to rename team')),
+  });
+
   const team = showManage ? data?.find((t: any) => t.teamName === showManage) : null;
 
   return (
@@ -225,6 +268,7 @@ export default function TeamPage() {
                   {isDirector && (
                     <>
                       <button onClick={() => setShowManage(team.teamName)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-xs font-medium" aria-label="Manage Members"><UserPlus className="h-3.5 w-3.5" />Members</button>
+                      <button onClick={() => setShowManage(team.teamName)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-xs font-medium" aria-label="Edit team name"><Pencil className="h-3.5 w-3.5" />Edit</button>
                       <button onClick={async () => { if (await confirm({ title: 'Delete Team', message: 'This will permanently remove this team and all its members. Continue?', variant: 'danger', confirmText: 'Delete' })) deleteTeam.mutate(team.teamName); }} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition text-xs font-medium" aria-label="Delete Team"><Trash2 className="h-3.5 w-3.5" />Delete</button>
                     </>
                   )}
@@ -278,6 +322,17 @@ export default function TeamPage() {
         {error && <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm rounded-xl px-4 py-3 mb-4">{error}</div>}
         {team && (
           <div className="space-y-4">
+            {isDirector && (
+              <div>
+                <h3 className="text-sm font-medium text-slate-300 mb-2">Team Name</h3>
+                <TeamNameEditor
+                  key={team.teamName}
+                  initial={team.teamName}
+                  pending={renameTeam.isPending}
+                  onRename={(newName) => renameTeam.mutate({ teamName: team.teamName, newName })}
+                />
+              </div>
+            )}
             <div>
               <h3 className="text-sm font-medium text-slate-300 mb-2">Current Members</h3>
               <div className="space-y-2 max-h-48 overflow-y-auto">
